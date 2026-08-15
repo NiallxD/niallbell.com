@@ -37,6 +37,11 @@
   --ease: 150ms ease;
 }
 
+.theme-transitioning,
+.theme-transitioning * {
+  transition: background-color 1s ease, color 1s ease, border-color 1s ease, fill 1s ease, stroke 1s ease, box-shadow 1s ease !important;
+}
+
 [data-theme="dark"] {
   --color-bg:        #111111;
   --color-surface:   #1a1a1a;
