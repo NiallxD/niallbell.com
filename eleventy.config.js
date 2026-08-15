@@ -787,6 +787,38 @@ export default function (eleventyConfig) {
       .map(r => r.item);
   });
 
+  eleventyConfig.addFilter("relatedPosts", (collection, currentUrl, tags) => {
+    if (!collection?.length || !tags?.length) return [];
+
+    const pageTags = Array.from(tags).map(t => String(t).toLowerCase().trim());
+
+    // Count how often each tag appears so common tags score less
+    const freq = {};
+    collection.forEach(i => {
+      (i.data.tags || []).forEach(t => {
+        const k = String(t).toLowerCase().trim();
+        freq[k] = (freq[k] || 0) + 1;
+      });
+    });
+
+    return collection
+      .filter(i => {
+        if (i.url === currentUrl) return false;
+        const itemTags = (i.data.tags || []).map(t => String(t).toLowerCase().trim());
+        return itemTags.some(t => pageTags.includes(t));
+      })
+      .map(i => {
+        const itemTags = (i.data.tags || []).map(t => String(t).toLowerCase().trim());
+        const score = itemTags
+          .filter(t => pageTags.includes(t))
+          .reduce((sum, t) => sum + 1 / (freq[t] || 1), 0);
+        return { item: i, score };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(r => r.item);
+  });
+
   eleventyConfig.addCollection("currentProject", (api) =>
     api.getAll()
       .filter((i) => i.data.current_project === true)
