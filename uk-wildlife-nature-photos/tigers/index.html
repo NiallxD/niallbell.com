@@ -16,7 +16,7 @@
   <meta property="og:title" content="The Plight of the Tiger — Niall Bell">
   <meta property="og:description" content="The tiger is facing incredible troubles in the wild due to poaching, habitat loss and human-wildlife conflict.">
   <meta property="og:image" content="/static/images/rtk0zzy.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -205,10 +205,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

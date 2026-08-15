@@ -16,7 +16,7 @@
   <meta property="og:title" content="Cloudspotting — Niall Bell">
   <meta property="og:description" content="Have you ever wondered where the idiom &quot;to be on cloud 9&quot; came from? Well, you&#39;ve got the folks at the Cloud Atlas to thank for that. Cumulonimbus was number 9 on their list of 10 main clouds. The cumulonimbus cloud is the largest riser cloud something reaching from its home as a low cloud all the way up to the high clouds! To be on cloud 9 would to be on top of the world!">
   <meta property="og:image" content="/static/images/EyV94Ox.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -214,10 +214,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

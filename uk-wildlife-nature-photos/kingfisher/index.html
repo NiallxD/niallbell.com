@@ -16,7 +16,7 @@
   <meta property="og:title" content="The Kingfisher — Niall Bell">
   <meta property="og:description" content="The Kingfisher is perhaps the UK&#39;s most vibrant and colourful bird. It&#39;s also one of the most enchanting. For the nature lover, little can compare to the feeling of excitement when one sees the characteristic flash of blue the Kingfisher is known for. Here is my gallery of photograph of Kingfishers. Almost all taken from one small spot in the middle of a nearby city.">
   <meta property="og:image" content="/static/images/YD0LSDY.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -3161,10 +3161,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

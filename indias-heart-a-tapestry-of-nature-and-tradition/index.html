@@ -16,7 +16,7 @@
   <meta property="og:title" content="India&#39;s Heart: A Tapestry of Nature and Tradition — Niall Bell">
   <meta property="og:description" content="In November 2022, I packed my bags and headed to India in search of wildlife. Specifically the Royal Bengal Tiger. During my two weeks in India, I gained so much more than I had hoped.">
   <meta property="og:image" content="/static/images/diPWwgj.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -215,10 +215,13 @@ Tal: <a href="https://www.instagram.com/tigstergram/">Tigstergram</a></p>
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

@@ -16,7 +16,7 @@
   <meta property="og:title" content="Canada Travel FAQ — Niall Bell">
   <meta property="og:description" content="I set up this FAQ to track all the frequently asked questions posed in the Alliance Visa group chat.">
   <meta property="og:image" content="https://www.canada.ca/content/dam/pch/images/services/flag-canada/stanley-design-13-point-leaf.jpg">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -348,10 +348,13 @@ Different provinces have different rules around cars. Check on the provinces off
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

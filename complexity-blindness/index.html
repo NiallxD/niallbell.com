@@ -16,7 +16,7 @@
   <meta property="og:title" content="Complexity Blindness — Niall Bell">
   <meta property="og:description" content="Humans consistently underestimate the complexity of systems they interact with, forming mental models from surface-level observations. This is a living note exploring complexity blindness and its implications.">
   <meta property="og:image" content="/static/images/p6DKgUu.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -175,10 +175,13 @@ So often in my day to day life I run into people/opinions which fall foul to the
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

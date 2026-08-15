@@ -16,7 +16,7 @@
   <meta property="og:title" content="Bald Eagle — Niall Bell">
   <meta property="og:description" content="The Bald Eagle is a majestic bird of prey, known for being the national bird and symbol of the United States. Adults have striking white heads and tails with dark brown bodies and wings. Their beaks and feet are bright yellow. Juveniles, on the other hand, are mostly brown with mottled white patches and dark beaks. These powerful hunters are often found near large bodies of water, where they hunt for fish, their primary diet.">
   <meta property="og:image" content="/static/images/FEpNXc5.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -3102,10 +3102,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

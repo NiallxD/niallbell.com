@@ -16,7 +16,7 @@
   <meta property="og:title" content="Are Commercial Photography Hides Acceptable? — Niall Bell">
   <meta property="og:description" content="A candid look at the ethics of commercial photography hides — are they acceptable practice for wildlife photographers? I work through the facts and share my personal view on a topic that divides the wildlife photography community.">
   <meta property="og:image" content="/static/images/a0xdQzW.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -252,10 +252,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

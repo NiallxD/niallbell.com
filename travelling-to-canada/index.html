@@ -16,7 +16,7 @@
   <meta property="og:title" content="Travelling To Canada — Niall Bell">
   <meta property="og:description" content="The story of how Claudia and I planned and prepared an eight-year-in-the-making move to Canada on the International Experience Canada work permit — two degrees, tonnes of work experience, and a lot of patience later.">
   <meta property="og:image" content="/static/images/yi0XicL.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -167,10 +167,13 @@ Ok, so this post is going to talk a bit about how Claudia and I came around to s
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

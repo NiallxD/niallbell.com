@@ -16,7 +16,7 @@
   <meta property="og:title" content="An Open Letter to YWP — Niall Bell">
   <meta property="og:description" content="An open letter to Yorkshire Wildlife Park responding to my membership cancellation. I set out my side of the story, the concerns I&#39;ve been raising for years about the park&#39;s practices, and why I believe YWP has an untapped potential to genuinely change how people connect with wildlife.">
   <meta property="og:image" content="/static/images/1pQK9Zn.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -229,10 +229,13 @@ to…</li>
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

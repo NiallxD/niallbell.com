@@ -16,7 +16,7 @@
   <meta property="og:title" content="Street Photography — Niall Bell">
   <meta property="og:description" content="Street photography isn&#39;t my main genre nor is it a genre that I&#39;m particularly good at. What it is a way of being creative. Nature photography is often as much about reproducing what we see in nature in our photographs as it is being creative and this can stifle your creativity. Street photograph doesn&#39;t have such a constraint in my eyes. The below are a selection of images I&#39;ve taken when out and about. They&#39;re not great, but they were fun to take and edit.">
   <meta property="og:image" content="/static/images/7eKn5qJ.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -3039,10 +3039,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

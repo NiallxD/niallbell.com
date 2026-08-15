@@ -16,7 +16,7 @@
   <meta property="og:title" content="How to Buy a Car In British Columbia, Canada — Niall Bell">
   <meta property="og:description" content="A step-by-step guide to buying a used car in British Columbia — from searching Facebook Marketplace to completing the ICBC transfer, paying tax, and driving away with plates.">
   <meta property="og:image" content="/static/images/oiwPNEa.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -225,10 +225,13 @@ Squamish is a great little town but it is not really pedestrian friendly. The bu
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

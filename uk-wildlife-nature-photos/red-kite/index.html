@@ -16,7 +16,7 @@
   <meta property="og:title" content="The Red Kite — Niall Bell">
   <meta property="og:description" content="The Red Kite (milvus milvus) is a remarkably elegant bird of prey that can be easily recognised by its reddish-brown plumage, angled wings, and distinctive forked tail. Thanks to one of the longest-running conservation programs in the world, this species was rescued from the brink of extinction in the UK. It has since been successfully reintroduced to England and Scotland and is now protected under Schedule 1 of The Wildlife and Countryside Act.">
   <meta property="og:image" content="/static/images/T8Nox8C.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -3103,10 +3103,13 @@
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');

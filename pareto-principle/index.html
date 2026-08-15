@@ -16,7 +16,7 @@
   <meta property="og:title" content="Pareto Principle — Niall Bell">
   <meta property="og:description" content="The Pareto Principle — the idea that roughly 80% of outcomes come from 20% of causes — and how it applies across nature, business, and everyday decision-making.">
   <meta property="og:image" content="/static/images/p6DKgUu.webp">
-  <link rel="stylesheet" href="/static/css/style.css?v=1.5">
+  <link rel="stylesheet" href="/static/css/style.css?v=1.6">
   <script>
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme !== 'light') {
@@ -166,10 +166,13 @@ This principle/rule states that you can roughly 80% of the consequences come fro
   <script>
     const themeToggle = document.getElementById('theme-toggle');
     themeToggle.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme');
+      const root = document.documentElement;
+      const current = root.getAttribute('data-theme');
       const target = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', target);
+      root.classList.add('theme-transitioning');
+      root.setAttribute('data-theme', target);
       localStorage.setItem('theme', target);
+      window.setTimeout(() => root.classList.remove('theme-transitioning'), 1000);
     });
 
     const menuToggle = document.getElementById('menu-toggle');
