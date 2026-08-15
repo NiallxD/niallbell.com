@@ -6,6 +6,7 @@ export default {
     if (data.Type === "Map") return "map.njk";
     if (data.Type === "ECard") return "ecard.njk";
     if (["Blog Post", "Photo Story", "Photo Analysis"].includes(data.Type)) return "post.njk";
+    if (data.Type === "Project") return "project.njk";
     return data.layout || "standard.njk";
   },
 
@@ -14,7 +15,10 @@ export default {
     if (data.page?.inputPath?.endsWith(".11ty.js")) return data.permalink;
     if (!data.page?.inputPath?.endsWith(".md")) return undefined;
     const publish = String(data.publish).trim().toLowerCase() === "true";
-    if (!publish || data.Type === "Project") return false;
+    if (!publish) return false;
+    // Project cards with a `url` link out instead of building a page.
+    // Project cards without an explicit permalink don't get a page either.
+    if (data.Type === "Project" && (data.url || !data.permalink)) return false;
     if (data.permalink) {
       if (data.permalink.endsWith(".html")) return data.permalink;
       const p = data.permalink.replace(/\/$/, "");

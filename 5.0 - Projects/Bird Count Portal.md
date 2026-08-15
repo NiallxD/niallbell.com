@@ -10,7 +10,8 @@ tags:
   - nature
   - tech
 icon: chart
-link: https://mbc.naturesquamish.ca
+heroImage:
+url: https://mbc.naturesquamish.ca
 order: 3
 ---
 

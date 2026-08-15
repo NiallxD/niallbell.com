@@ -10,6 +10,7 @@ tags:
   - web
   - gis
 icon: map
-link: https://ecoscapes.naturesquamish.ca
+heroImage:
+url: https://ecoscapes.naturesquamish.ca
 order: 1
 ---

@@ -143,14 +143,7 @@ description: The personal site of Niall Bell, a nature photographer, writer, and
 </div>
 {% endif %}
 
-{% set mapPage = collections.maps | first %}
-{% if mapPage and mapPage.data.focalPoints %}
-  {% set mapPins = mapPage.data.focalPoints | resolveFocalPoints(photographs) %}
-{% elif mapPage %}
-  {% set mapPins = mapPage.content | parseMapBlocks %}
-{% else %}
-  {% set mapPins = [] %}
-{% endif %}
+{% set mapPins = collections.galleries | buildMapPins | onlyHomepage %}
 <div class="home-map-row">
     <div class="home-map-col">
       <div class="home-block-header">
@@ -285,7 +278,7 @@ description: The personal site of Niall Bell, a nature photographer, writer, and
   });
 
   {% if mapPins and mapPins.length %}
-  const homePins = {{ mapPins | dump | safe }}.filter(p => p.image);
+  const homePins = {{ mapPins | dump | safe }}.filter(p => p.src);
   if (homePins.length) {
     const worldBounds = [[-85, -180], [85, 180]];
     const homeMap = L.map('home-photo-map', {
@@ -299,20 +292,23 @@ description: The personal site of Niall Bell, a nature photographer, writer, and
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
       maxZoom: 19
     }).addTo(homeMap);
-    const homeCluster = L.markerClusterGroup({ maxClusterRadius: 60 });
+    const homeCluster = L.markerClusterGroup({ maxClusterRadius: 60, zoomToBoundsOnClick: false, spiderfyOnMaxZoom: false });
     homePins.forEach(pin => {
       const icon = L.divIcon({
         className: 'photo-marker',
-        html: `<div class="photo-marker-inner"><img src="${pin.image}" alt="${pin.title}"></div>`,
+        html: `<div class="photo-marker-inner"><img src="${pin.src}" alt="${pin.title}"></div>`,
         iconSize: [56, 56],
         iconAnchor: [28, 28]
       });
-      L.marker([pin.lat, pin.lng], { icon })
-        .bindPopup(`<div class="map-popup"><img src="${pin.image}" alt="${pin.title}" class="map-popup-img"><div class="map-popup-title">${pin.title}</div></div>`,
-          { maxWidth: 220, className: 'photo-map-popup' })
-        .addTo(homeCluster);
+      L.marker([pin.lat, pin.lng], { icon }).addTo(homeCluster);
     });
     homeMap.addLayer(homeCluster);
+
+    // The homepage widget is just a teaser — any click sends visitors to the full map
+    const goToFullMap = () => { window.location.href = '{{ "/photo-map/" | url }}'; };
+    homeMap.on('click', goToFullMap);
+    homeCluster.on('click', goToFullMap);
+    homeMap.getContainer().style.cursor = 'pointer';
   }
   {% endif %}
 

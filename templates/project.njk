@@ -1,0 +1,165 @@
+---
+layout: page.njk
+---
+{% block head %}
+<link rel="stylesheet" href="{{ '/static/css/swiper-bundle.min.css' | url }}"/>
+{% endblock %}
+
+{% if heroImage %}
+<div class="home-hero-wrapper">
+  <div class="home-slideshow-fs">
+    <img src="{{ heroImage }}" alt="{{ title }}" class="img-cover">
+  </div>
+  <section class="home-hero-overlay">
+    <h1 class="home-title">{{ title }}</h1>
+    {% if description %}<p class="home-intro">{{ description }}</p>{% endif %}
+    <div class="post-meta" style="margin-top: 1rem;">
+      {% if date %}<time datetime="{{ date | isoDate }}" style="color: rgba(255, 255, 255, 0.8);">{{ date | readableDate }}</time>{% endif %}
+      {% if tags and tags.length %}
+        {% for tag in tags %}<span class="tag" style="background: rgba(255, 255, 255, 0.15); border-color: transparent; color: #fff;">{{ tag }}</span>{% endfor %}
+      {% endif %}
+    </div>
+  </section>
+</div>
+{% endif %}
+
+<article class="post">
+  <div class="post-body">
+    {% if not heroImage %}
+    <header class="post-header">
+      <h1>{{ title }}</h1>
+      <div class="post-meta">
+        {% if date %}<time datetime="{{ date | isoDate }}">{{ date | readableDate }}</time>{% endif %}
+        {% if tags and tags.length %}
+          {% for tag in tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+        {% endif %}
+      </div>
+    </header>
+    {% endif %}
+    <div class="post-content">{{ content | stripGalleryBlocks | safe }}</div>
+  </div>
+</article>
+
+{% set slides = [] %}
+{% if 'gallery-start' in content %}{% set slides = content | parseGalleryBlocks %}{% endif %}
+{% if slides.length %}
+<div class="gallery-body" style="max-width: 760px; margin-left: auto; margin-right: auto;">
+  <p class="section-label">Gallery</p>
+
+  <div class="gallery-slideshow-container no-bg desktop-only">
+    <div class="swiper gallery-swiper">
+      <div class="swiper-wrapper">
+        {% for img in slides %}
+        <div class="swiper-slide">
+          <div class="slide-inner">
+            {% if img.type == 'iframe' %}
+              <iframe src="{{ img.src }}" allowfullscreen class="gallery-iframe-viewer"></iframe>
+            {% else %}
+              <img src="{{ img.url | default(img.src) }}" alt="{{ img.alt | default(img.title) }}" loading="lazy" onload="const _r=this.naturalWidth/this.naturalHeight;this.classList.add(_r>1.05?'is-landscape':_r<0.95?'is-portrait':'is-square')">
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div class="swiper-button-prev"></div>
+      <div class="swiper-button-next"></div>
+    </div>
+
+    <div class="gallery-pagination swiper-pagination"></div>
+
+    <div id="gallery-caption-area" class="gallery-caption-external">
+      <h3 id="slide-title"></h3>
+      <p id="slide-desc"></p>
+    </div>
+  </div>
+
+  <div class="gallery-mobile-grid mobile-only">
+    {% for img in slides %}
+    <div class="mobile-grid-item">
+      <div class="mobile-grid-media">
+        {% if img.type == 'iframe' %}
+          <div class="iframe-placeholder">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+            <span>Video Content</span>
+          </div>
+        {% else %}
+          <img src="{{ img.url | default(img.src) }}" alt="{{ img.alt | default(img.title) }}" loading="lazy">
+        {% endif %}
+      </div>
+      {% if img.title or img.caption %}
+      <div class="mobile-grid-content">
+        {% if img.title %}<h4 class="mobile-grid-title">{{ img.title }}</h4>{% endif %}
+        {% if img.caption %}<div class="mobile-grid-caption">{{ img.caption | safe }}</div>{% endif %}
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  <script>
+    const galleryData = {{ slides | dump | safe }};
+  </script>
+</div>
+
+<script src="{{ '/static/js/swiper-bundle.min.js' | url }}"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const titleEl = document.getElementById('slide-title');
+    const descEl = document.getElementById('slide-desc');
+    const captionArea = document.getElementById('gallery-caption-area');
+
+    const updateCaption = (index) => {
+      if (typeof galleryData === 'undefined' || !galleryData[index]) return;
+      const data = galleryData[index];
+      titleEl.textContent = data.title || "";
+      descEl.innerHTML = data.caption || "";
+      captionArea.style.display = (data.title || data.caption) ? 'block' : 'none';
+    };
+
+    const swiperElements = document.querySelectorAll('.gallery-swiper');
+    if (swiperElements.length > 0) {
+      const swiper = new Swiper('.gallery-swiper', {
+        loop: true,
+        keyboard: { enabled: true },
+        speed: 600,
+        pagination: {
+          el: '.gallery-pagination',
+          type: 'fraction',
+          renderFraction: function (currentClass, totalClass) {
+            return '<span class="' + currentClass + '"></span>' +
+                   ' <span class="fraction-sep">of</span> ' +
+                   '<span class="' + totalClass + '"></span>';
+          }
+        },
+        navigation: { nextEl: '.swiper-button-next', prevEl: '.swiper-button-prev' },
+        on: {
+          init: function () { updateCaption(this.realIndex); },
+          slideChange: function () { updateCaption(this.realIndex); }
+        }
+      });
+    }
+  });
+</script>
+{% endif %}
+
+{% set related = collections.projects | relatedPosts(page.url, tags) %}
+{% if related and related.length %}
+<div class="gallery-related">
+  <p class="section-label">More Projects</p>
+  <div class="story-list">
+    {% for project in related %}
+    <a href="{{ project.data.url if project.data.url else (project.url | url) }}" class="story-card"{% if project.data.url %} target="_blank" rel="noopener"{% endif %}>
+      <div class="story-card-img">
+        {% if project.data.coverImage %}
+        <img src="{{ project.data.coverImage }}" alt="{{ project.data.title }}" loading="lazy">
+        {% endif %}
+      </div>
+      <div class="story-card-body">
+        <div class="story-card-title">{{ project.data.title }}</div>
+        {% if project.data.excerpt %}<div class="story-card-desc">{{ project.data.excerpt }}</div>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

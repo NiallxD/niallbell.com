@@ -1,16 +1,21 @@
 ---
 title: NumBird - iOS App
 author: Niall Bell
-date: 2026-04-25
-Type: Standard
+date: 2026-02-22
+Type: Project
 publish: true
-permalink: numbird-app
+permalink: /numbird-app
+url:
 description: NumBird is an app for iOS which takes a users eBird data and performs a range of data analysis to present the data and allow the user to analyse their birding history.
 excerpt: NumBird is an app for iOS which takes a users eBird data and performs a range of data analysis to present the data and allow the user to analyse their birding history.
+tags:
+  - nature
+  - birding
+icon: phone
 heroImage: /static/images/ivXjySy.webp
-sectionLabel: NUMBIRD APP
-layout: standard.njk
+order: 2
 ---
+
 <figure class="image-float-right">
 <img src="/static/images/ivXjySy.webp" alt="Graphic showing the various screens of the NumBird app"><figcaption>Graphic showing the various screens of the NumBird app. NumBird has over 20 different analyses including a taxonomy explorer.</figcaption></figure>
 

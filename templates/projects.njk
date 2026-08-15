@@ -28,7 +28,7 @@ layout: page.njk
   <div class="projects-list">
     {% for project in collections.projects %}
     <div class="project-card-wrapper">
-      <a href="{{ project.data.link | default('#') }}" class="project-card-full"{% if project.data.link and 'niallbell.com' not in project.data.link %} target="_blank" rel="noopener"{% endif %}>
+      <a href="{{ project.data.url if project.data.url else (project.url | url) }}" class="project-card-full"{% if project.data.url %} target="_blank" rel="noopener"{% endif %}>
         <div class="project-card-body">
           <div class="project-card-icon-wrap">
             {% if project.data.icon == 'chart' %}

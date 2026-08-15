@@ -120,4 +120,8 @@ Set as `<meta http-equiv="Content-Security-Policy">` in `templates/base.njk`. Ap
 
 **When adding new external image sources**, add the domain to `img-src` — missing domains silently block images in production.
 
-Current `img-src` domains: `https://i.imgur.com`, `https://*.basemaps.cartocdn.com`, `https://m.media-amazon.com`, `https://images-na.ssl-images-amazon.com`, `https://i.gr-assets.com`
+Current `img-src` domains: `https://i.imgur.com`, `https://*.basemaps.cartocdn.com`, `https://m.media-amazon.com`, `https://images-na.ssl-images-amazon.com`, `https://i.gr-assets.com`, `https://images.gr-assets.com`, `https://tiles.openfreemap.org`, `https://cdn.jsdelivr.net`, `https://server.arcgisonline.com`
+
+Same applies to `connect-src` for any XHR/fetch calls (map tile providers, form endpoints) — currently includes web3forms, val.run endpoints, openfreemap, jsdelivr, arcgisonline, cartocdn.
+
+**Note:** `/photo-map`'s Cesium globe uses Esri World Imagery (no account needed) — Bing Maps Aerial via Cesium Ion was tried and reverted: Bing's tile metadata resolves to `http://` URLs, which real HTTPS pages block as mixed content regardless of CSP, so it only ever worked on plain-http localhost. Also note CSP wildcards only cover one subdomain level (`*.virtualearth.net` does NOT match `ecn.t0.tiles.virtualearth.net`, two levels deep) — worth remembering if a similar multi-level-subdomain host comes up again. Don't reintroduce Ion/Bing without solving the mixed-content issue first.

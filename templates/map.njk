@@ -41,8 +41,11 @@ layout: base.njk
     align-items: center;
     gap: 0.4rem;
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background 0.15s ease, border-color 0.15s ease, opacity 0.2s ease;
+    opacity: 0;
+    pointer-events: none;
   }
+  #globe-reset.visible { opacity: 1; pointer-events: auto; }
   #globe-reset:hover { background: var(--color-surface); border-color: var(--color-accent); }
 
   /* Side panel */
@@ -190,9 +193,12 @@ layout: base.njk
 </script>
 <script src="https://cdn.jsdelivr.net/npm/cesium/Build/Cesium/Cesium.js"></script>
 <script>
-  const pins = {{ collections.galleries | buildMapPins(imageGPS) | dump | safe }};
+  const pins = {{ collections.galleries | buildMapPins | dump | safe }};
 
-  // Disable Ion — we're using our own tile sources
+  // Disable Ion — Bing Maps Aerial via a free Ion token was tried, but Bing's
+  // tile metadata resolves to http:// URLs, which HTTPS production pages
+  // block as mixed content regardless of CSP. Back to Esri, which is free,
+  // needs no account, and works identically on localhost and production.
   Cesium.Ion.defaultAccessToken = '';
 
   // ── Tile providers ─────────────────────────────────────────────────────────
@@ -230,12 +236,18 @@ layout: base.njk
   // Faster zoom
   viewer.scene.screenSpaceCameraController.zoomFactor = 12.0;
 
-  // Disable atmosphere and fog so imagery is crisp at all altitudes
-  viewer.scene.skyAtmosphere.show = false;
+  // Soft blue atmosphere glow around the limb and real sun-based shading —
+  // left at Cesium's natural defaults, which are tuned to look like an
+  // actual photo of Earth from space (no fog/color shifts washing it out)
+  viewer.scene.skyAtmosphere.show = true;
+  viewer.scene.globe.showGroundAtmosphere = true;
+  viewer.scene.globe.enableLighting = true;
   viewer.scene.fog.enabled = false;
-  viewer.scene.globe.enableLighting = false;
-  viewer.scene.globe.showGroundAtmosphere = false;
+  // Deep ocean-blue fallback while tiles stream in, instead of flat black
+  viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString('#0a1a33');
   viewer.scene.backgroundColor = Cesium.Color.BLACK;
+  viewer.scene.sun.show = false;
+  viewer.scene.moon.show = false;
 
   // Start high above Earth — shows the full sphere
   viewer.camera.setView({
@@ -255,9 +267,20 @@ layout: base.njk
     return Cesium.Cartesian3.dot(normal, toCam) > 0;
   }
 
+  // Starting altitude — the "Globe" reset button only appears once the
+  // camera has zoomed in meaningfully below this
+  const INITIAL_HEIGHT = 22000000;
+  const globeResetBtn = document.getElementById('globe-reset');
+
+  function updateGlobeResetVisibility() {
+    const cameraHeight = Cesium.Cartographic.fromCartesian(viewer.camera.position).height;
+    globeResetBtn.classList.toggle('visible', cameraHeight < INITIAL_HEIGHT * 0.6);
+  }
+
   function updatePins() {
     pointColl.removeAll();
     labelColl.removeAll();
+    updateGlobeResetVisibility();
     const cameraHeight = Cesium.Cartographic.fromCartesian(viewer.camera.position).height;
     const showLabels   = cameraHeight < 2000000;
     pins.forEach((pin, i) => {

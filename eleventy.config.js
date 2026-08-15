@@ -545,8 +545,10 @@ export default function (eleventyConfig) {
         const lines = plainText.split('\n').map(l => l.trim()).filter(l => l);
         const gearLine = lines.find(l => l.includes('|'));
         const gear = gearLine || "";
-        if (gear) {
-          const captionText = lines.filter(l => l !== gearLine).join(' ').trim();
+        // Extract the loc: lat, lng [H] line (GPS coords for the photo map — never shown in captions)
+        const locLine = lines.find(l => /^loc:/i.test(l));
+        if (gear || locLine) {
+          const captionText = lines.filter(l => l !== gearLine && l !== locLine).join(' ').trim();
           pureCaption = captionText ? `<p>${captionText}</p>` : "";
         }
 
@@ -596,13 +598,15 @@ export default function (eleventyConfig) {
     return slides;
   });
 
-  eleventyConfig.addFilter("buildMapPins", (galleries, imageGPS) => {
-    if (!galleries || !imageGPS) return [];
+  eleventyConfig.addFilter("buildMapPins", (galleries) => {
+    if (!galleries) return [];
     const pins = [];
 
     // Matches both <img src="..."> and bare /static/images/xxx.webp URLs
     const imgSrcRe  = /<img[^>]+src="(\/static\/images\/([A-Za-z0-9_\-]+\.[a-z]+))"/i;
     const rawUrlRe  = /(?:^|[\s"'(>])((\/static\/images\/)([A-Za-z0-9_\-]+\.(?:webp|jpg|jpeg|png)))/im;
+    // "loc: 20.244442, 79.471181" — optionally followed by " [H]" to flag it for the homepage widget
+    const locRe = /loc:\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*(\[H\])?/i;
 
     for (const gallery of galleries) {
       const html = gallery.templateContent || '';
@@ -619,73 +623,41 @@ export default function (eleventyConfig) {
         if (!title || /gallery-(start|end)|testimonials-(start|end)/i.test(title)) continue;
 
         // Try <img src> first, then bare URL
-        let src, filename;
+        let src;
         const imgMatch = block.match(imgSrcRe);
         if (imgMatch) {
           src = imgMatch[1];
-          filename = imgMatch[2];
         } else {
           const rawMatch = block.match(rawUrlRe);
           if (!rawMatch) continue;
           src = rawMatch[1].trim();
-          filename = src.replace('/static/images/', '');
         }
 
-        const gps = imageGPS[filename];
-        if (!gps) continue;
+        const locMatch = block.replace(/<[^>]+>/g, ' ').match(locRe);
+        if (!locMatch) continue;
+        const lat = parseFloat(locMatch[1]);
+        const lng = parseFloat(locMatch[2]);
+        const homepage = !!locMatch[3];
 
         const caption = block
           .replace(/<h2[^>]*>[\s\S]*?<\/h2>/i, '')
           .replace(/<img[^>]+>/gi, '')
           .replace(/\/static\/images\/[^\s<"']+/gi, '')
           .replace(/<[^>]+>/g, ' ')
+          .replace(/loc:\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*(?:\[H\])?/gi, '')
           .replace(/\s+/g, ' ')
           .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
           .trim();
 
-        pins.push({ src, title, caption, galleryTitle, galleryUrl, lat: gps.lat, lng: gps.lng });
+        pins.push({ src, title, caption, galleryTitle, galleryUrl, lat, lng, homepage });
       }
     }
 
     return pins;
   });
 
-  eleventyConfig.addFilter("resolveFocalPoints", (focalPoints, allPhotos) => {
-    if (!focalPoints) return [];
-    const photos = allPhotos || [];
-    
-    function getDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371; // km
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
-    }
-
-    return focalPoints.map(point => {
-      const lat = point.coords[0];
-      const lng = point.coords[1];
-      const radius = point.radius || 10;
-      
-      const nearbyPhotos = photos.filter(photo => {
-        const dist = getDistance(lat, lng, photo.lat, photo.lng);
-        return dist <= radius;
-      });
-
-      return {
-        title: point.name,
-        lat,
-        lng,
-        photos: nearbyPhotos,
-        count: nearbyPhotos.length > 0 ? nearbyPhotos.length : (point.image ? 1 : 0),
-        image: nearbyPhotos.length > 0 ? nearbyPhotos[0].thumb : (point.image || null)
-      };
-    });
-  });
+  // Photos flagged with " [H]" on their loc: line in a gallery caption
+  eleventyConfig.addFilter("onlyHomepage", (pins) => (pins || []).filter((p) => p.homepage));
 
   eleventyConfig.addFilter("parseMapBlocks", (html) => {
     if (!html) return [];
