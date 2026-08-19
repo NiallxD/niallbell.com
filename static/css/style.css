@@ -1048,6 +1048,29 @@ main {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+/* In the fixed-height reading column the card height is set by the grid row,
+   so the cover takes the leftover space instead of dictating its own height —
+   otherwise a long, wrapping title is pushed out of the bottom of the card. */
+.home-reading-col .home-reading-card {
+  overflow: hidden;
+}
+
+.home-reading-col .home-reading-cover {
+  aspect-ratio: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  object-fit: contain;
+  object-position: center;
+}
+
+.home-reading-title,
+.home-reading-author {
+  overflow-wrap: anywhere;
 }
 
 .home-reading-title {
@@ -1168,6 +1191,17 @@ main {
   #home-photo-map {
     flex: none;
     height: 400px;
+  }
+  /* The row loses its fixed height here, so the ticker (and its absolutely
+     positioned slides) needs an explicit one or it collapses to zero and the
+     card spills over the section below. */
+  .home-reading-root {
+    flex: none;
+  }
+  .home-reading-ticker,
+  .home-reading-root > .home-reading-card {
+    flex: none;
+    height: 420px;
   }
   .home-prints-col .prints-cta {
     min-height: 420px;
