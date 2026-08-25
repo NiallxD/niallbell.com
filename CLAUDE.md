@@ -138,6 +138,29 @@ guesses, partner mood drain).
 
 ---
 
+## Markdown Footnotes
+
+Obsidian-style footnotes (`text[^1]` … `[^1]: note`) render via **markdown-it-footnote**, wired up
+in `eleventy.config.js` alongside the wikilink plugin. Both are safe together — the wikilink core
+ruler walks inline tokens, and footnote bodies are inline tokens too, so `[[links]]` work inside
+notes.
+
+Two renderer overrides in the config:
+- **`footnote_block_open/close`** — emits `<h2 class="footnotes-title">Notes</h2>` inside an
+  `aria-labelledby` section instead of the default bare `<hr>` + list, so the block is labelled.
+- **`footnote_caption`** — a footnote cited twice defaults to `[4:1]` for the second use, which
+  reads as a typo. Overridden to show the plain number; anchor ids stay unique (`fnref4`,
+  `fnref4:1`) so both citations still link back correctly.
+
+Styles live in `static/css/style.css` under `/* ── Footnotes ── */`, themed off the existing
+CSS vars. `scroll-margin-top` accounts for the fixed `.site-header` (`--nav-height`), and
+`.footnote-item:target` highlights whichever note you jumped to.
+
+`markdown-it` is now an explicit dependency (it was only present transitively via Eleventy, even
+though the config imports it directly). It dedupes to Eleventy's copy, so there's still one instance.
+
+---
+
 ## Ongoing: Gallery Captions
 
 Adding titles and captions to photography gallery `.md` files. Format:
@@ -169,6 +192,47 @@ Moving inline `<script>` blocks from Nunjucks templates into `static/js/` files 
 - `modals.js`, `analytics.js`, `interactive-elements.js`, `gallery-filter.js`, `gallery-swiper.js`, `map.js`, `stats.js`
 
 The theme detection script (6 lines, runs before DOM load) may need to stay inline to avoid flash of wrong theme.
+
+---
+
+## 360 Panoramas — self-hosted viewer
+
+The panoramas at `/360-panorama/` embed **`/pano/?img=/static/images/X.webp`**, a viewer page on
+this site (`templates/pano.njk` + `static/js/panorama.js`) that loads pannellum from jsDelivr.
+
+They previously embedded `cdn.pannellum.org/2.5/pannellum.htm#panorama=/static/images/X.webp`,
+which was broken two ways: CSP had no `frame-src` entry for pannellum.org, and — more
+fundamentally — that viewer runs on pannellum's origin, so a *relative* panorama path resolved to
+`cdn.pannellum.org/static/images/…` and 404'd. Serving the viewer ourselves keeps the paths
+relative and correct, works in local dev, and keeps a third-party host out of `frame-src`
+(same-origin `'self'` covers it).
+
+**Why an iframe and not a div:** the gallery pipeline extracts `<iframe src="…">` out of markdown
+(`eleventy.config.js`, the `iframeRegex` around line 510) and turns each into a swiper slide of
+`type: "iframe"`. Plain elements are never picked up as slides — they'd land in the hidden content
+fallback and render nothing. Keep panoramas as iframes.
+
+**Previews are generated at build time.** The `pano-preview` hook in `eleventy.config.js` scans the
+built HTML for `/pano/?img=…`, downscales each panorama to 1024px WebP via sharp, and writes it to
+`_site/static/images/pano-preview/` (build output only — nothing generated lands in the vault).
+`panorama.js` passes that as pannellum's `preview`, so an unloaded slide shows the actual scene
+rather than a blank placeholder, and the mobile grid uses the same file for its thumbnail. Total
+~189KB for all five, against 1.8MB if the full images were used as previews the way the old
+cdn.pannellum.org embeds did (`&preview=` pointed at the full-size panorama).
+
+**autoLoad is deliberately `false`.** The page renders each panorama twice (once as a swiper slide,
+once in the `{% if not images %}` hidden fallback), so ten viewers exist on one page. Auto-loading
+five ~1.8MB equirectangular images meant ~7MB of transfer and ten live WebGL contexts; click-to-load
+costs ~5KB until the reader asks for one. Don't flip this to `true` without first de-duplicating
+those two render sites.
+
+The mobile grid distinguishes panorama iframes from video iframes by testing for `/pano/?img=` in
+`img.src` — otherwise every panorama rendered as a video-camera placeholder captioned
+"Video Content".
+
+**`static/js/panorama.js` validates the `img` parameter** — `/static/…` paths only, rejecting
+absolute URLs, protocol-relative `//`, backslashes and `..`. The page is embeddable, so without that
+check the parameter would render an arbitrary remote image under this site's name.
 
 ---
 

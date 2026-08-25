@@ -120,7 +120,6 @@ Here are the issues for which I've been advocating for change. Some are bespoke 
 6. Outwardly prioritise the Zoo's mission over commercial events and assets[^11].
 7. Be open and honest with locals, respect local planning regulations, and hold forum for discussion with concerned parties[^12].
 
-### Footnotes
 
 [^1]: I have a message from a YWP employee advising me that this was the reason they blocked me on social media.
 [^2]: YWP stopped letting members in after 16:00 when the new entrance opened despite us not having this restriction before. No matter what I tried to get it sorted, nobody helped or responded.

@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
 import markdownIt from "markdown-it";
+import markdownItFootnote from "markdown-it-footnote";
 
 function buildWikilinkMap(rootDir) {
   const map = new Map();
@@ -222,9 +223,72 @@ export default function (eleventyConfig) {
     } catch { return []; }
   });
 
-  // Markdown-it with HTML enabled + wikilinks
+  // ── 360 panorama previews ────────────────────────────────────
+  // Pannellum shows a `preview` image behind the "Click to Load" button. The
+  // old cdn.pannellum.org embeds pointed preview at the full-size panorama, so
+  // the browser pulled ~1.8MB per scene just to draw a flat placeholder — five
+  // scenes rendered twice each meant several MB before anyone clicked anything.
+  // Generate small previews instead, straight into the build output so nothing
+  // generated lands in the vault.
+  eleventyConfig.on("eleventy.after", async ({ dir }) => {
+    const { default: sharp } = await import("sharp");
+    const { mkdir, readdir, readFile, writeFile } = await import("fs/promises");
+
+    const outDir = join(dir.output, "static/images/pano-preview");
+    const wanted = new Set();
+
+    // Collect every panorama actually embedded in the built site.
+    async function scan(d) {
+      let entries;
+      try { entries = await readdir(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        const full = join(d, e.name);
+        if (e.isDirectory()) { await scan(full); continue; }
+        if (!e.name.endsWith(".html")) continue;
+        const html = await readFile(full, "utf8");
+        const re = /\/pano\/\?img=(\/static\/images\/[^"'&\s]+)/g;
+        let m;
+        while ((m = re.exec(html)) !== null) wanted.add(decodeURIComponent(m[1]));
+      }
+    }
+    await scan(dir.output);
+    if (wanted.size === 0) return;
+
+    await mkdir(outDir, { recursive: true });
+    for (const rel of wanted) {
+      const name = rel.split("/").pop();
+      try {
+        const buf = await sharp(join(".", rel))
+          .resize({ width: 1024, withoutEnlargement: true })
+          .webp({ quality: 58 })
+          .toBuffer();
+        await writeFile(join(outDir, name), buf);
+      } catch (err) {
+        console.warn(`[pano-preview] skipped ${name}: ${err.message}`);
+      }
+    }
+    console.log(`[pano-preview] generated ${wanted.size} panorama preview(s)`);
+  });
+
+  // Markdown-it with HTML enabled + wikilinks + footnotes
   const wikilinkMap = buildWikilinkMap(".");
   const md = markdownIt({ html: true, linkify: true, typographer: true });
+  md.use(markdownItFootnote);
+
+  // Give the notes block a real heading rather than a bare <hr> + list, so it
+  // is labelled for screen readers as well as sighted readers.
+  md.renderer.rules.footnote_block_open = () =>
+    '<section class="footnotes" aria-labelledby="footnotes-label">\n' +
+    '<h2 class="footnotes-title" id="footnotes-label">Notes</h2>\n' +
+    '<ol class="footnotes-list">\n';
+  md.renderer.rules.footnote_block_close = () => '</ol>\n</section>\n';
+
+  // A footnote cited more than once defaults to "[4:1]" for the second use.
+  // Correct, but it reads as a typo — show the plain number every time. The
+  // anchor ids stay unique, so both citations still link back correctly.
+  md.renderer.rules.footnote_caption = (tokens, idx) =>
+    '[' + String(Number(tokens[idx].meta.id + 1)) + ']';
+
   wikilinkPlugin(md, wikilinkMap);
   eleventyConfig.setLibrary("md", md);
 
