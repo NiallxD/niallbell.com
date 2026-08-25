@@ -20,14 +20,35 @@
 ## Active Project: ADHD Mind Simulator (`/adhd/`)
 
 ### What It Is
-A physics-driven, empathy-through-mechanics web game at `/adhd/`. The player experiences a simulated ADHD morning — dragging tasks into a wandering "focus box", fighting intrusive thoughts, managing body system meters, and experiencing scripted failure events that demonstrate how ADHD actually affects cognition. The goal is understanding, not gamification.
+A physics-driven, empathy-through-mechanics web game at `/adhd/`. The player works a
+simulated ADHD morning against a **fixed 07:00–09:00 clock** (~4 real minutes), then gets a
+**debrief** that explains what happened to them and why. The goal is understanding, not
+gamification — and the debrief is the payload, not the session.
 
 ### Files
 | File | Purpose |
 |---|---|
-| `templates/adhd.njk` | Standalone full-screen page (no nav, no base.njk). Loads VT323, React 18, ReactDOM 18, Babel Standalone 7 via CDN. Inline terminal CSS. |
-| `static/js/adhd-game.js` | The entire game (~2300 lines JSX). Loaded via `<script type="text/babel" data-presets="react">`. |
-| `1.0 - Main Pages/ADHD Game.md` | Eleventy content file — `permalink: /adhd/`, `layout: adhd.njk`, `noindex: true` |
+| `templates/adhd.njk` | Standalone full-screen page (no nav, no base.njk). Loads VT323, React 18, ReactDOM 18, Babel Standalone via CDN. Inline terminal CSS. |
+| `static/js/adhd-game.js` | The entire game (~3000 lines JSX). Loaded via `<script type="text/babel" data-presets="react">`. |
+| `1.0 - Main Pages/9.8 - ADHD Game.md` | Eleventy content file — `permalink: /adhd/`, `layout: adhd.njk`, `noindex: true` |
+
+### ⚠️ CDN versions are pinned — do not un-pin
+`@babel/standalone` is pinned to **7.29.8**. Babel 8 changed `preset-react` to default to the
+*automatic* JSX runtime, which emits `import { jsx } from "react/jsx-runtime"` — an ES module
+import that cannot resolve in a plain `text/babel` script tag with no bundler. Un-pinning
+(`@babel/standalone` with no version) silently serves 8.x and the page dies on the loading
+screen with no visible error. React/ReactDOM are pinned to 18.3.1 for the same class of reason.
+
+*Longer-term option:* pre-compile the JSX with Babel and commit the output, dropping the
+~1.5MB Babel payload and the in-browser compile entirely.
+
+### Phases
+`intro` → (`config`) → `playing` → `debrief`
+
+- **intro** — cold open, typed terminal text, no stat block. `[ PARAMETERS ]` is an opt-in side door.
+- **config** — the six sliders, each captioned with the mechanic it drives. Reached from the intro or the debrief, never forced up front.
+- **playing** — the session, ending at 09:00 or via `[ LEAVE NOW ]`.
+- **debrief** — the ledger, the event log, and `DEBRIEF_NOTES` (see below).
 
 ### Technical Stack
 - **React 18 UMD + ReactDOM 18 UMD** via unpkg (global `window.React` / `window.ReactDOM`)
@@ -35,48 +56,85 @@ A physics-driven, empathy-through-mechanics web game at `/adhd/`. The player exp
 - **HTML5 Canvas 2D** for the physics activity map
 - **Web Audio API** for oscillator-based sound effects (no audio files)
 - **VT323** Google Font; phosphor green `#39ff14`; CRT scanline aesthetic
+- Pointer Events throughout (mouse + touch on one path); `REDUCED_MOTION` honours `prefers-reduced-motion`
 
 ### Architecture (`adhd-game.js`)
-The file is divided into 6 sections:
-
 ```
-§1  CONSTANTS & GAME DATA    — palette, PHYSICS constants, morningTasks[], HYPERFOCUS_NAGGING[], BODY_TASKS{}
-§2  PHYSICS UTILITIES        — physicsUpdate(), renderCanvas(), pure helper fns
-§3  CANVAS RENDER            — renderCanvas() — draw order: bg → connection lines → intrusive nodes → task nodes → focus box → nagging text
+§1  CONSTANTS & GAME DATA    — palette, PHYSICS, SESSION, morningTasks[], HYPERFOCUS_NAGGING[], BODY_TASKS{}
+§2  PHYSICS UTILITIES        — uiScaleFor(), computeBoxSize(), applyUiScale(), holdRequiredMs(),
+                               snapTaskIntoBox(), physicsUpdate()
+§3  CANVAS RENDER            — renderCanvas() — bg → connection lines → intrusive → tasks → focus box → nagging text
 §4  WEB AUDIO ENGINE         — initAudio(), playSnap(), playError(), playDriveSpike(), playEject()
-§5  REACT COMPONENTS         — ConfigScreen, GameLayout, LeftPanel, ActivityMap, RightPanel, overlays
+§5  REACT COMPONENTS         — IntroScreen, ConfigScreen, GameLayout, LeftPanel, ActivityMap,
+                               RightPanel, overlays, buildLedger()/DEBRIEF_NOTES/Debrief
 §6  APP ROOT                 — App component + ReactDOM.createRoot mount
 ```
 
-**State separation pattern:**
-- Physics state lives in `physicsRef` (mutated in rAF loop, no re-renders)
-- React `useState` synced every 200ms from the rAF loop
-- `driveRef`, `metersRef`, `profileRef` mirror React state for rAF reads
+**State separation:** physics state lives in `physicsRef` (mutated in the rAF loop, no re-renders);
+React `useState` syncs every 200ms from that loop. `driveRef`, `metersRef`, `profileRef` mirror
+React state for rAF reads.
 
-**Canvas init pattern (`pendingInitRef`):**
-`startGame` sets `pendingInitRef.current = profile` and `physicsRef.current = null`. The `ResizeObserver` in `ActivityMap` calls `initPhysics(pendingInitRef.current, w, h)` on its first fire once the canvas has real dimensions. This avoids the 0×0 canvas problem.
+**Canvas init (`pendingInitRef`):** `handleBegin` sets `pendingInitRef.current = profile` and
+`physicsRef.current = null`. The `ResizeObserver` in `ActivityMap` calls `initPhysics(...)` on its
+first fire once the canvas has real dimensions, avoiding the 0×0 canvas problem.
+
+**Responsive:** `uiScaleFor(w,h)` (1.0 desktop → 0.42 phone) scales the focus box, every node and
+every canvas font; the box is additionally clamped to 82%/78% of the canvas. `useIsNarrow(860)`
+swaps the 3-column terminal for a stacked phone layout (meters strip → canvas → list drawer).
 
 ### Core Mechanics
-- **Hold-to-snap:** drag a task toward the focus box — cursor must stay inside for `initiationCost × 3200ms` before the node pops in. Per-task `initiationCost` controls how hard each task is to start.
-- **In-box drift:** tasks inside the box slowly drift outward; player must keep re-dragging them back. Rate: `TASK_DRIFT_IN_BOX: 0.18` × focus level.
-- **Intrusive thoughts:** spawn from canvas edges, attract toward the box. Drag-and-flick to eject. Suppressed (drift away) during hyperfocus.
-- **Body meters:** BLADDER, HUNGER, THIRST, FATIGUE drain continuously. At 35% → intrusive thought spawns. At 12% → body task node spawns; dragging it in ejects all other tasks and locks the box until complete.
-- **Drive bar:** rises on task complete, falls when idle. Affects box size, task drift, spawn rate.
+- **Hold-to-snap (initiation cost):** drag a task to the focus box and hold. `holdRequiredMs()` maps
+  `initiationCost` through a `^2.2` curve to 420–2600ms — the exponent matters, because most chores
+  sit at 0.85–0.98 and a linear map made them all feel like the same flat wait. Waiting mode ×1.7.
+- **The hold is unstable, not a wait.** It runs in `physicsUpdate` (not the pointer handler) so it
+  advances every frame and the node *squirms* while held. Slip is measured against a **smoothed,
+  box-relative anchor** (~130ms time constant): box-relative so tracking the drifting box is free,
+  smoothed because a fixed anchor planted at the boundary leaves anyone still moving inward
+  permanently slipping and unable to start anything at all.
+- **In-box drift:** tasks inside the box drift outward; you must keep re-dragging them back.
+- **Intrusive thoughts:** spawn from edges, attract toward the box. Drag-and-flick to eject.
+  Suppressed during hyperfocus.
+- **Body meters:** BLADDER/HUNGER/THIRST/FATIGUE drain at per-session randomised rates whose ranges
+  straddle the rate that would just reach critical by 09:00 — so which systems bite varies each run.
+  35% → intrusive thought; 12% → body task node that locks the box.
+- **Drive bar:** rises on completion, falls when idle. Affects box size, drift, spawn rate.
+- **`persistent: true`** on the scripted chain (`meet_volunteer`, `email_volunteer`, `hang_keys`,
+  `tell_partner_keys`, `take_meds`) — these bounce off the forget zone instead of being forgotten.
+  Without it the authored content drifts off-screen and the whole point of the piece is deleted.
 
 ### Hyperfocus
-Triggered when a `canHyperfocus: true` task snaps into the box (probabilistic, once per task per session):
-- Box turns purple, panels fade to 12% opacity
-- All other in-box tasks ejected; hyperfocus task locked in (cannot be dragged out)
-- Intrusive thoughts actively drift away
-- 4 random nagging thoughts from `HYPERFOCUS_NAGGING[]` appear as ghostly amber text on canvas
-- On complete: nagging thoughts spawn as urgent flashing task nodes; everything fades back in
+Triggered probabilistically when a `canHyperfocus` task snaps in. Box turns purple, panels fade to
+12%, other tasks ejected, intrusive thoughts drift away, 4 nagging thoughts appear as ghostly amber
+text; on completion they spawn as urgent task nodes.
+
+**Guard:** nothing else can snap in while hyperfocus holds, exclusive-task ejection spares the
+hyperfocus node, and a safety valve in `physicsUpdate` releases hyperfocus if its node ever stops
+being a live in-box task. Without these, an exclusive task snapping in ejects the hyperfocus node
+and strands `hyperfocus === true` forever — no `hyperfocus_end`, distraction spawning suppressed
+for the rest of the session.
+
+### Waiting Mode (anticipation paralysis)
+From **08:00** there is an appointment at **08:30**. `phys.waitingMode` multiplies every non-body
+task's initiation hold by 1.7 and shows a banner. An hour with a thing in it is not a usable hour.
+
+### The Debrief
+- `buildLedger(phys, extra)` harvests per-task rows plus session totals from physics state.
+- **`abandonedReaches`** — released mid-hold with >5% progress. The most honest number the piece has:
+  reached for it, didn't start it, and from the outside nothing happened.
+- `DEBRIEF_NOTES[]` — each note has a `test(L)` and only renders if that thing actually happened to
+  *this* player, in *this* session. Nothing is generic. Add new notes here rather than writing prose
+  into the component.
 
 ### Scripted Failure Events
-**Event 1 — Volunteer conversation (`meet_volunteer`):**
-Word-by-word NPC dialogue; key details highlighted amber. If task leaves box mid-conversation, words replaced with `[...]`. On complete → email subtask unlocks. When email task snaps, `NameSelectOverlay` shows 5 wrong name options (all wrong by design). Response always triggers awkward relationship outcome.
+**Event 1 — Volunteer conversation (`meet_volunteer`):** word-by-word NPC dialogue, key details
+amber. If the task leaves the box the words become `[...]`. On complete the email subtask unlocks;
+snapping it shows `NameSelectOverlay` with 5 names, **all wrong by design** — the name was never
+encoded, so there is no right option to offer.
 
-**Event 2 — Keys location (`hang_keys`):**
-At 85% progress, a forced intrusive thought spawns and `keysActualLocation` is set to `null` (location never committed to memory). Task shows as `✓ COMPLETE`. When `tell_partner_keys` subtask snaps, `LocationSelectOverlay` shows 4 options (all wrong). Leads to `LocationSearchGrid` — 12-cell grid, timed wrong guesses, partner mood drain.
+**Event 2 — Keys (`hang_keys`):** at 85% progress a forced intrusive thought spawns and
+`keysActualLocation` is set to `null`. The task still reads `✓ COMPLETE`. `tell_partner_keys` then
+shows `LocationSelectOverlay` (4 options, all wrong) → `LocationSearchGrid` (12 cells, timed wrong
+guesses, partner mood drain).
 
 ---
 
