@@ -459,6 +459,26 @@ p {
     margin: 0;
   }
 
+  /* 360 badge over a panorama preview in the mobile grid */
+  .mobile-grid-media { position: relative; }
+
+  .pano-badge {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    pointer-events: none;
+  }
+
   .iframe-placeholder {
     width: 100%;
     height: 100%;
@@ -2751,6 +2771,74 @@ p.section-label,
   border: none;
   border-top: 1px solid var(--color-border);
   margin: 2.5rem 0;
+}
+
+/* ── Footnotes (markdown-it-footnote) ─────────────────────────── */
+
+/* The [1] marker in the body text */
+.post-content .footnote-ref a {
+  font-family: var(--font-sans);
+  font-size: 0.75em;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 0 0.15em;
+  color: var(--color-link);
+}
+
+.post-content .footnote-ref a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.post-content .footnotes {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.post-content .footnotes-title {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+  margin: 0 0 1rem;
+}
+
+.post-content .footnotes-list {
+  padding-left: 1.25rem;
+  margin-bottom: 0;
+}
+
+.post-content .footnote-item {
+  margin-bottom: 0.9em;
+}
+
+.post-content .footnote-item p {
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: var(--color-muted);
+  margin-bottom: 0.4em;
+}
+
+/* Jumping to a note should make it obvious which one you landed on */
+.post-content .footnote-item:target {
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 0.5rem var(--color-surface);
+}
+
+/* The fixed header would otherwise sit on top of the anchor target */
+.post-content .footnote-item,
+.post-content .footnote-ref {
+  scroll-margin-top: calc(var(--nav-height, 64px) + 1.5rem);
+}
+
+.post-content .footnote-backref {
+  text-decoration: none;
+  font-size: 0.9em;
+  margin-left: 0.15em;
 }
 
 .post-content code {
