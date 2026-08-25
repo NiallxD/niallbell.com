@@ -25,15 +25,35 @@ const PHYSICS = {
   DAMPING: 0.88,
   BOX_BASE_W: 620,
   BOX_BASE_H: 420,
-  GAME_TIME_MULT: 60,
+  GAME_TIME_MULT: 30,
+  // Initiation hold: base ms at initiationCost 1.0. The hold is *unstable* —
+  // the node wanders while you hold it, so this is active effort, not a wait.
+  HOLD_BASE_MS: 2600,
+  HOLD_MIN_MS: 420,
+  HOLD_WANDER: 46,        // px/s the node fights you while holding
+  HOLD_SLIP_RADIUS: 54,   // cursor drift beyond this and progress bleeds back
+  HOLD_DECAY_RATE: 1.6,   // progress lost per second while slipped
 };
+
+// The session runs on a wall clock. Everything is paced against it.
+const SESSION = {
+  START_MS: 7 * 3600 * 1000,        // 07:00
+  END_MS: 9 * 3600 * 1000,          // 09:00 — you have to leave
+  APPOINTMENT_MS: 8.5 * 3600 * 1000, // 08:30 — the thing you're waiting for
+  WAITING_ONSET_MS: 8 * 3600 * 1000, // 08:00 — anticipation starts eating you
+};
+
+// Honour the OS setting. The CRT flicker/scanlines are decorative.
+const REDUCED_MOTION = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  : false;
 
 const morningTasks = [
   { id: 'brush_teeth', label: 'BRUSH TEETH', duration: 25, urgency: 'daily', reward: 8, interest: 0.1, initiationCost: 0.95, canHyperfocus: false, isExclusive: true },
   { id: 'shower', label: 'SHOWER', duration: 55, urgency: 'daily', reward: 14, interest: 0.15, initiationCost: 0.85, canHyperfocus: false, isExclusive: true },
   { id: 'eat_breakfast', label: 'EAT BREAKFAST', duration: 80, urgency: 'health', reward: 16, interest: 0.3, initiationCost: 0.7, canHyperfocus: false },
   { id: 'bins_out', label: 'PUT BINS OUT', duration: 55, urgency: 'weekly', reward: 7, interest: 0.05, initiationCost: 0.98, canHyperfocus: false },
-  { id: 'meet_volunteer', label: 'MEET NEW VOLUNTEER', duration: 90, canHyperfocus: true, hyperfocusProbability: 0.55, urgency: 'medium', reward: 30, interest: 0.6, initiationCost: 0.4,
+  { id: 'meet_volunteer', persistent: true, label: 'MEET NEW VOLUNTEER', duration: 90, canHyperfocus: true, hyperfocusProbability: 0.55, urgency: 'medium', reward: 30, interest: 0.6, initiationCost: 0.4,
     conversationEvent: true,
     conversationData: {
       npcName: 'Jamie Reeves',
@@ -44,13 +64,13 @@ const morningTasks = [
       memoryFadeMultiplier: 2.5,
     }
   },
-  { id: 'email_volunteer', label: 'EMAIL NEW VOLUNTEER', duration: 35, urgency: 'medium', reward: 10, interest: 0.2, initiationCost: 0.75, lockedUntil: 'meet_volunteer', canHyperfocus: false },
-  { id: 'hang_keys', label: 'HANG UP CAR KEYS', duration: 12, urgency: 'low', reward: 5, interest: 0.05, initiationCost: 0.9, canHyperfocus: false,
+  { id: 'email_volunteer', persistent: true, label: 'EMAIL NEW VOLUNTEER', duration: 35, urgency: 'medium', reward: 10, interest: 0.2, initiationCost: 0.75, lockedUntil: 'meet_volunteer', canHyperfocus: false },
+  { id: 'hang_keys', persistent: true, label: 'HANG UP CAR KEYS', duration: 12, urgency: 'low', reward: 5, interest: 0.05, initiationCost: 0.9, canHyperfocus: false,
     locationEvent: true, itemId: 'car_keys', intendedLocation: 'hook by door', failureWindow: 0.85, subtaskId: 'tell_partner_keys'
   },
-  { id: 'tell_partner_keys', label: 'TELL PARTNER: KEYS', duration: 12, urgency: 'low', reward: 4, interest: 0.1, initiationCost: 0.6, lockedUntil: 'hang_keys', canHyperfocus: false },
+  { id: 'tell_partner_keys', persistent: true, label: 'TELL PARTNER: KEYS', duration: 12, urgency: 'low', reward: 4, interest: 0.1, initiationCost: 0.6, lockedUntil: 'hang_keys', canHyperfocus: false },
   { id: 'empty_dishwash', label: 'EMPTY DISHWASHER', duration: 65, urgency: 'daily', reward: 7, interest: 0.1, initiationCost: 0.88, canHyperfocus: false },
-  { id: 'take_meds', label: 'TAKE MEDICATION', duration: 8, urgency: 'critical', reward: 30, interest: 0.2, initiationCost: 0.6, canHyperfocus: false, isExclusive: true },
+  { id: 'take_meds', persistent: true, label: 'TAKE MEDICATION', duration: 8, urgency: 'critical', reward: 30, interest: 0.2, initiationCost: 0.6, canHyperfocus: false, isExclusive: true },
   { id: 'order_shopping', label: 'ORDER SHOPPING', duration: 120, urgency: 'medium', reward: 12, interest: 0.35, initiationCost: 0.8, canHyperfocus: true, hyperfocusProbability: 0.7 },
   { id: 'make_bed', label: 'MAKE BED', duration: 35, urgency: 'low', reward: 6, interest: 0.1, initiationCost: 0.92, canHyperfocus: false },
   { id: 'feed_cat', label: 'FEED THE CAT', duration: 20, urgency: 'daily', reward: 9, interest: 0.2, initiationCost: 0.75, canHyperfocus: false },
@@ -179,13 +199,35 @@ function pickSessionTasks() {
 // §2 PHYSICS UTILITIES
 // ═══════════════════════════════════════════════════════════════
 
-function computeBoxSize(profile, drive) {
-  let w = PHYSICS.BOX_BASE_W * (0.6 + profile.focusLevel * 0.8);
-  let h = PHYSICS.BOX_BASE_H * (0.6 + profile.focusLevel * 0.8);
+function uiScaleFor(canvasW, canvasH) {
+  // 1.0 on a roomy desktop canvas, down to ~0.42 on a phone.
+  const byW = canvasW / 1000;
+  const byH = canvasH / 700;
+  return clamp(Math.min(byW, byH), 0.42, 1);
+}
+
+function computeBoxSize(profile, drive, canvasW, canvasH) {
+  const scale = (canvasW && canvasH) ? uiScaleFor(canvasW, canvasH) : 1;
+  let w = PHYSICS.BOX_BASE_W * scale * (0.6 + profile.focusLevel * 0.8);
+  let h = PHYSICS.BOX_BASE_H * scale * (0.6 + profile.focusLevel * 0.8);
   if (profile.medicated) { w *= 1.3; h *= 1.3; }
   if (drive < 30) { w *= 0.85; h *= 0.85; }
   if (drive > 80) { w *= 1.12; h *= 1.12; }
+  // Never larger than the space it has to live in.
+  if (canvasW) w = Math.min(w, canvasW * 0.82);
+  if (canvasH) h = Math.min(h, canvasH * 0.78);
   return { w: Math.round(w), h: Math.round(h) };
+}
+
+// Keep every node sized to the current canvas. Cheap — a dozen nodes a frame.
+function applyUiScale(phys, canvasW, canvasH) {
+  const scale = uiScaleFor(canvasW, canvasH);
+  if (phys.uiScale === scale) return;
+  phys.uiScale = scale;
+  const w = Math.round(220 * scale);
+  const h = Math.round(72 * scale);
+  phys.taskNodes.forEach(n => { n.w = w; n.h = h; });
+  phys.intrusiveNodes.forEach(n => { n.w = w; n.h = h; });
 }
 
 function spawnFromEdge(canvasW, canvasH) {
@@ -239,6 +281,102 @@ function spawnBetweenBoxAndEdge(focusBox, canvasW, canvasH) {
   };
 }
 
+// How long the initiation hold takes for a given task, in ms.
+// The exponent widens the top end: most chores sit at 0.85-0.98 initiationCost,
+// and a linear map made them all feel like the same flat wait.
+function holdRequiredMs(node, phys) {
+  const cost = node.initiationCost != null ? node.initiationCost : 0.75;
+  const curved = Math.pow(cost, 2.2);
+  let ms = PHYSICS.HOLD_MIN_MS + (PHYSICS.HOLD_BASE_MS - PHYSICS.HOLD_MIN_MS) * curved;
+  // Anticipation paralysis: with something scheduled and looming, starting
+  // anything unrelated costs far more.
+  if (phys && phys.waitingMode && !node.isBodyTask) ms *= 1.7;
+  return ms;
+}
+
+// Commit a task node into the focus box. Called from the physics loop once the
+// initiation hold completes. Pushes events rather than playing audio directly.
+function snapTaskIntoBox(phys, node, canvasW, canvasH, events) {
+  // Nothing else gets in while hyperfocus has hold of you.
+  if (phys.hyperfocus && phys.hyperfocusTaskId !== node.id) return false;
+
+  node.x = phys.focusBox.x;
+  node.y = phys.focusBox.y;
+  node.vx = 0;
+  node.vy = 0;
+  node.isInBox = true;
+  node.dragging = false;
+  node.timeInBox = 0;
+  node.decaying = false;
+  node.decayTimer = 0;
+  node.snapFlash = 500;
+  node.snapProgress = 0;
+  node.holdActive = false;
+  node.holdMs = 0;
+  node.holdAnchorX = null;
+  node.holdAnchorRelX = null;
+  node.startedCount = (node.startedCount || 0) + 1;
+
+  if (isExclusiveNode(node)) {
+    phys.exclusiveTaskActive = node.id;
+    if (node.isBodyTask) phys.bodyTaskActive = node.bodyKey;
+    phys.taskNodes.forEach(n => {
+      if (n.isInBox && n.id !== node.id && n.id !== phys.hyperfocusTaskId) {
+        n.isInBox = false;
+        n.vx = (Math.random() - 0.5) * 10;
+        n.vy = (Math.random() - 0.5) * 10;
+        n.decaying = true; n.decayTimer = 0;
+      }
+    });
+  }
+
+  events.push({ type: 'task_snap_in', nodeId: node.id });
+
+  // Hyperfocus trigger — eligible tasks only, once per task per session
+  if (node.canHyperfocus && !phys.hyperfocus && !phys.forcedEventFired['hyperfocus_' + node.id]
+      && Math.random() < (node.hyperfocusProbability || 0)) {
+    phys.forcedEventFired['hyperfocus_' + node.id] = true;
+    phys.hyperfocus = true;
+    phys.hyperfocusTaskId = node.id;
+    phys.hyperfocusTaskLabel = node.label;
+    phys.hyperfocusStartedAt = Date.now();
+    phys.taskNodes.forEach(n => {
+      if (n.isInBox && n.id !== node.id) {
+        n.isInBox = false;
+        n.vx = (Math.random() - 0.5) * 10;
+        n.vy = (Math.random() - 0.5) * 10;
+        n.decaying = true; n.decayTimer = 0;
+      }
+    });
+    const shuffled = [...HYPERFOCUS_NAGGING].sort(() => Math.random() - 0.5).slice(0, 4);
+    phys.nagThoughts = shuffled.map((n) => {
+      const margin = 80;
+      return {
+        ...n,
+        x: margin + Math.random() * (canvasW - margin * 2),
+        y: margin + Math.random() * (canvasH - margin * 2),
+        alpha: 0,
+        speed: 0.25 + Math.random() * 0.5,
+        phase: Math.random() * Math.PI * 2,
+      };
+    });
+    events.push({ type: 'hyperfocus_start', nodeId: node.id });
+  }
+
+  if (node.conversationEvent && !phys.forcedEventFired['conv_' + node.id]) {
+    phys.forcedEventFired['conv_' + node.id] = true;
+    phys.pendingOverlay = { type: 'conversation', nodeId: node.id, data: node.conversationData };
+  }
+  if (node.id === 'email_volunteer' && !phys.forcedEventFired['email_select']) {
+    phys.forcedEventFired['email_select'] = true;
+    phys.pendingOverlay = { type: 'name_select', nodeId: node.id, data: node.conversationData || morningTasks.find(t => t.id === 'meet_volunteer').conversationData };
+  }
+  if (node.id === 'tell_partner_keys' && !phys.forcedEventFired['location_tell']) {
+    phys.forcedEventFired['location_tell'] = true;
+    phys.pendingOverlay = { type: 'location_tell', nodeId: node.id, data: { correctLocation: phys.keysActualLocation } };
+  }
+}
+
 function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW, canvasH) {
   const phys = physicsRef.current;
   const profile = profileRef.current;
@@ -258,7 +396,8 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
     phys.focusBox.vy *= 0.92;
   }
 
-  const { w: bw, h: bh } = computeBoxSize(profile, driveRef.current);
+  applyUiScale(phys, canvasW, canvasH);
+  const { w: bw, h: bh } = computeBoxSize(profile, driveRef.current, canvasW, canvasH);
   phys.focusBox.w = bw;
   phys.focusBox.h = bh;
 
@@ -273,6 +412,18 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
   phys.focusBox.y += phys.focusBox.vy;
   phys.focusBox.x = clamp(phys.focusBox.x, bw / 2 + 10, canvasW - bw / 2 - 10);
   phys.focusBox.y = clamp(phys.focusBox.y, bh / 2 + 10, canvasH - bh / 2 - 10);
+
+  // Track total time lost to hyperfocus, for the debrief
+  if (phys.hyperfocus) {
+    phys.hyperfocusTotalMs = (phys.hyperfocusTotalMs || 0) + dt;
+    // Safety valve: if the node driving it is gone, don't strand the session.
+    const hfNode = phys.taskNodes.find(n => n.id === phys.hyperfocusTaskId);
+    if (!hfNode || !hfNode.isInBox || hfNode.status === 'complete' || hfNode.status === 'forgotten') {
+      phys.hyperfocus = false;
+      phys.hyperfocusTaskId = null;
+      events.push({ type: 'hyperfocus_end' });
+    }
+  }
 
   // ── Hyperfocus nagging thought animation ────────────────────
   if (phys.hyperfocus && phys.nagThoughts) {
@@ -313,7 +464,8 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
     }
 
     // Continuous push out for non-exclusive tasks if an exclusive task is active in the box
-    if (phys.exclusiveTaskActive && phys.exclusiveTaskActive !== node.id && node.isInBox) {
+    if (phys.exclusiveTaskActive && phys.exclusiveTaskActive !== node.id && node.isInBox
+        && node.id !== phys.hyperfocusTaskId) {
       node.isInBox = false;
       const pdx = node.x - phys.focusBox.x;
       const pdy = node.y - phys.focusBox.y;
@@ -328,6 +480,74 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
 
     // Track urgency pending time
     if (node.status === 'pending') node.pendingTime = (node.pendingTime || 0) + dt;
+
+    // ── Initiation hold ─────────────────────────────────────────
+    // Runs here rather than in the pointer handler so it advances every frame,
+    // and so the node can actively fight you while you hold it. Starting a task
+    // is effort, not a wait.
+    if (node.holdActive && !node.isInBox) {
+      if (node.wobSeed == null) node.wobSeed = Math.random() * Math.PI * 2;
+      const blocked = (phys.exclusiveTaskActive && phys.exclusiveTaskActive !== node.id)
+        || (phys.hyperfocus && phys.hyperfocusTaskId !== node.id);
+      if (blocked) {
+        node.snapProgress = 0;
+      } else {
+        const req = node.holdBypass ? 0 : holdRequiredMs(node, phys);
+
+        // Slip is measured against a *smoothed, box-relative* anchor.
+        //
+        // Box-relative because the focus box drifts on its own: tracking it has
+        // to be free, or holding on would be impossible by design rather than
+        // hard. Smoothed because a fixed anchor is planted the instant the
+        // cursor crosses the boundary — anyone still moving inward after that
+        // is then permanently slipping and can never start anything at all.
+        // The anchor chases the cursor with a ~130ms time constant, so drift
+        // reads as *recent* movement: hold steady and it decays to zero, move
+        // fast or erratically and it stays above the slip radius.
+        const relX = node.holdCursorX - phys.focusBox.x;
+        const relY = node.holdCursorY - phys.focusBox.y;
+        if (node.holdAnchorRelX == null) {
+          node.holdAnchorRelX = relX;
+          node.holdAnchorRelY = relY;
+        }
+        const follow = 1 - Math.exp(-dt / 130);
+        node.holdAnchorRelX += (relX - node.holdAnchorRelX) * follow;
+        node.holdAnchorRelY += (relY - node.holdAnchorRelY) * follow;
+        const adx = relX - node.holdAnchorRelX;
+        const ady = relY - node.holdAnchorRelY;
+        const drift = Math.sqrt(adx * adx + ady * ady);
+        if (drift > PHYSICS.HOLD_SLIP_RADIUS) {
+          node.holdMs = Math.max(0, (node.holdMs || 0) - dt * PHYSICS.HOLD_DECAY_RATE);
+          node.holdSlipping = true;
+        } else {
+          node.holdMs = (node.holdMs || 0) + dt;
+          node.holdSlipping = false;
+        }
+        node.snapProgress = req > 0 ? Math.min(1, node.holdMs / req) : 1;
+        phys.totalHoldMs = (phys.totalHoldMs || 0) + dt;
+
+        // The node squirms. Harder-to-start tasks squirm more.
+        const cost = node.initiationCost != null ? node.initiationCost : 0.75;
+        const tw = Date.now() / 1000;
+        const wob = node.holdBypass ? 0 : PHYSICS.HOLD_WANDER * cost;
+        const wobX = (Math.sin(tw * 2.7 + node.wobSeed) * 0.6 + Math.sin(tw * 1.3 + node.wobSeed * 2) * 0.4) * wob;
+        const wobY = (Math.cos(tw * 2.1 + node.wobSeed) * 0.6 + Math.cos(tw * 1.7 + node.wobSeed * 3) * 0.4) * wob;
+
+        // Pin to the box edge along the approach vector, plus the squirm.
+        const hbdx = node.holdCursorX - phys.focusBox.x;
+        const hbdy = node.holdCursorY - phys.focusBox.y;
+        const hHalfW = phys.focusBox.w / 2;
+        const hHalfH = phys.focusBox.h / 2;
+        const hScale = Math.min(hHalfW / (Math.abs(hbdx) || 0.001), hHalfH / (Math.abs(hbdy) || 0.001));
+        node.x = phys.focusBox.x + hbdx * hScale + wobX;
+        node.y = phys.focusBox.y + hbdy * hScale + wobY;
+
+        if (node.holdMs >= req) {
+          snapTaskIntoBox(phys, node, canvasW, canvasH, events);
+          continue;
+        }
+      }
+    }
 
     if (node.isInBox) {
       anyInBox = true;
@@ -406,7 +626,7 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
         if (node.decayTimer > decayWindow && node.progress > 0 && node.status !== 'complete') {
           const decayRate = (1 - profile.workingMemory) * 0.05;
           node.progress = Math.max(0, node.progress - decayRate * dtS);
-          if (node.progress <= 0) {
+          if (node.progress <= 0 && !node.persistent) {
             node.status = 'forgotten';
             events.push({ type: 'task_forgotten', nodeId: node.id });
           }
@@ -417,8 +637,10 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
       const dx = node.x - phys.focusBox.x;
       const dy = node.y - phys.focusBox.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      // Drift strength: worse focusLevel (less attention) makes them drift faster
-      const driftSpeed = (1.4 - profile.focusLevel) * 0.25 * dtS;
+      // Drift strength: worse focus (less attention) makes them drift faster.
+      // Paced so total neglect takes most of the two hours to lose something,
+      // rather than emptying the board in the first minute.
+      const driftSpeed = (1.4 - profile.focusLevel) * 0.10 * dtS;
       node.vx += (dx / dist) * driftSpeed;
       node.vy += (dy / dist) * driftSpeed;
 
@@ -440,7 +662,16 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
         node.y <= forgetMarginY ||
         node.y >= canvasH - forgetMarginY
       );
-      if (hitForgetZone) {
+      if (hitForgetZone && node.persistent) {
+        // Nags its way back in rather than vanishing.
+        const rdx = phys.focusBox.x - node.x;
+        const rdy = phys.focusBox.y - node.y;
+        const rd = Math.sqrt(rdx * rdx + rdy * rdy) || 1;
+        node.vx = (rdx / rd) * 2.2;
+        node.vy = (rdy / rd) * 2.2;
+        node.x = clamp(node.x, forgetMarginX + node.w / 2, canvasW - forgetMarginX - node.w / 2);
+        node.y = clamp(node.y, forgetMarginY + node.h / 2, canvasH - forgetMarginY - node.h / 2);
+      } else if (hitForgetZone) {
         node.status = 'forgotten';
         events.push({ type: 'task_forgotten', nodeId: node.id });
       } else {
@@ -494,7 +725,6 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
       dragOffX: 0, dragOffY: 0,
     };
     phys.intrusiveNodes.push(newNode);
-    console.log(`[Telemetry] Spawning new distraction node. ID: ${newNode.id}, Label: "${newNode.label}", maxDrags/dragsLeft: ${newNode.maxDrags}`);
   }
 
   // Update intrusive nodes
@@ -505,7 +735,6 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
       node.y += node.vy;
       node.opacity -= 0.02;
       if (node.opacity <= 0 || node.x < -200 || node.x > canvasW + 200 || node.y < -200 || node.y > canvasH + 200) {
-        console.log(`[Telemetry] Distraction node boundary/opacity trigger (defeated). Splicing ID: ${node.id}`);
         phys.intrusiveNodes.splice(i, 1);
       }
       continue;
@@ -560,6 +789,7 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
     const idx_dy = node.y - phys.focusBox.y;
     if (Math.abs(idx_dx) < phys.focusBox.w / 2 && Math.abs(idx_dy) < phys.focusBox.h / 2 && !node.isInBox) {
       node.isInBox = true;
+      phys.distractionsLandedCount = (phys.distractionsLandedCount || 0) + 1;
       if (node.rewarding) {
         driveRef.current = clamp(driveRef.current + 8, 0, 100);
         events.push({ type: 'distraction_rewarding', nodeId: node.id });
@@ -580,6 +810,7 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
           }
           // Random timer between 20s and 45s (20000ms to 45000ms)
           activeTask.reappearTimer = 20000 + Math.random() * 25000;
+          phys.thoughtsLostCount = (phys.thoughtsLostCount || 0) + 1;
           events.push({ type: 'train_of_thought_lost', nodeId: activeTask.id });
         }
       }
@@ -602,10 +833,11 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
 
   // Meter drains
   const m = metersRef.current;
-  m.bladder = clamp(m.bladder - 0.8 * dtS, 0, 100);
-  m.hunger = clamp(m.hunger - 0.4 * dtS, 0, 100);
-  m.thirst = clamp(m.thirst - 0.6 * dtS, 0, 100);
-  m.fatigue = clamp(m.fatigue - 0.3 * dtS, 0, 100);
+  const dr = phys.meterRates || { bladder: 0.36, hunger: 0.20, thirst: 0.27, fatigue: 0.15 };
+  m.bladder = clamp(m.bladder - dr.bladder * dtS, 0, 100);
+  m.hunger = clamp(m.hunger - dr.hunger * dtS, 0, 100);
+  m.thirst = clamp(m.thirst - dr.thirst * dtS, 0, 100);
+  m.fatigue = clamp(m.fatigue - dr.fatigue * dtS, 0, 100);
 
   // Body meter intrusive thoughts — warning at 35%, critical at 12%
   const warningLabels = {
@@ -643,6 +875,8 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
 
     if (m[key] < 12 && !phys.meterCritical[key] && staggerOk) {
       phys.meterCritical[key] = true;
+      if (!phys.metersHitCritical) phys.metersHitCritical = [];
+      if (phys.metersHitCritical.indexOf(key) === -1) phys.metersHitCritical.push(key);
       // Intrusive thought
       if (!phys.intrusiveNodes.find(n => n.id === 'body_' + key)) {
         const pos = spawnFromEdge(canvasW, canvasH);
@@ -684,6 +918,7 @@ function physicsUpdate(physicsRef, profileRef, driveRef, metersRef, dt, canvasW,
 // ═══════════════════════════════════════════════════════════════
 
 function renderCanvas(ctx, phys, profile, drive) {
+  const S = phys.uiScale || 1;
   const { width: W, height: H } = ctx.canvas;
   ctx.fillStyle = C.BG;
   ctx.fillRect(0, 0, W, H);
@@ -700,7 +935,7 @@ function renderCanvas(ctx, phys, profile, drive) {
   ctx.strokeRect(fX, fY, fW, fH);
   
   // Repeating diagonal warning text stamps in the Forget Zone margins
-  ctx.font = 'bold 16px VT323, monospace';
+  ctx.font = `bold ${Math.round(16 * S)}px VT323, monospace`;
   ctx.fillStyle = 'rgba(255, 155, 0, 0.12)'; // faded orange
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -821,7 +1056,7 @@ function renderCanvas(ctx, phys, profile, drive) {
     ctx.shadowBlur = 0;
 
     // Label (cleaned up uppercase text)
-    ctx.font = '22px VT323, monospace';
+    ctx.font = `${Math.round(22 * S)}px VT323, monospace`;
     ctx.fillStyle = C.AMBER;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -832,7 +1067,7 @@ function renderCanvas(ctx, phys, profile, drive) {
     // Reward indicator (usually always has high reward, default to 35)
     const REWARD_MAX = 40;
     const filled = Math.round(((node.reward || 35) / REWARD_MAX) * 5);
-    ctx.font = '16px VT323, monospace';
+    ctx.font = `${Math.round(16 * S)}px VT323, monospace`;
     let diamonds = '';
     for (let d = 0; d < 5; d++) diamonds += d < filled ? '◆' : '◇';
     ctx.fillText(diamonds, node.x, node.y + 2);
@@ -914,7 +1149,7 @@ function renderCanvas(ctx, phys, profile, drive) {
     }
 
     // Label
-    ctx.font = '22px VT323, monospace';
+    ctx.font = `${Math.round(22 * S)}px VT323, monospace`;
     ctx.fillStyle = isBlocked ? '#ff3131' : (node.status === 'complete' ? C.PRIMARY_DIM : C.PRIMARY);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -930,7 +1165,7 @@ function renderCanvas(ctx, phys, profile, drive) {
       ctx.shadowBlur = 6;
       ctx.shadowColor = C.AMBER;
     }
-    ctx.font = '16px VT323, monospace';
+    ctx.font = `${Math.round(16 * S)}px VT323, monospace`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     let diamonds = '';
@@ -942,7 +1177,7 @@ function renderCanvas(ctx, phys, profile, drive) {
     // Progress bar
     if (node.status !== 'complete') {
       if (isBlocked) {
-        ctx.font = '16px VT323, monospace';
+        ctx.font = `${Math.round(16 * S)}px VT323, monospace`;
         ctx.fillStyle = '#ff3131';
         ctx.fillText('PREOCCUPIED', node.x, node.y + 14);
       } else {
@@ -956,7 +1191,7 @@ function renderCanvas(ctx, phys, profile, drive) {
         ctx.fillRect(barX, barY, barW * node.progress, barH);
       }
     } else {
-      ctx.font = '18px VT323, monospace';
+      ctx.font = `${Math.round(18 * S)}px VT323, monospace`;
       ctx.fillStyle = C.PRIMARY_DIM;
       ctx.fillText('COMPLETE', node.x, node.y + 14);
     }
@@ -980,7 +1215,7 @@ function renderCanvas(ctx, phys, profile, drive) {
   ctx.strokeRect(box.x - box.w / 2, box.y - box.h / 2, box.w, box.h);
   ctx.fillStyle = boxFill;
   ctx.fillRect(box.x - box.w / 2, box.y - box.h / 2, box.w, box.h);
-  ctx.font = '18px VT323, monospace';
+  ctx.font = `${Math.round(18 * S)}px VT323, monospace`;
   ctx.fillStyle = boxLabelColor;
   ctx.textAlign = 'center';
   ctx.setLineDash([]);
@@ -995,7 +1230,7 @@ function renderCanvas(ctx, phys, profile, drive) {
     for (const nag of phys.nagThoughts) {
       if (!nag.alpha || nag.alpha <= 0) continue;
       ctx.globalAlpha = nag.alpha;
-      ctx.font = 'italic 21px VT323, monospace';
+      ctx.font = `italic ${Math.round(21 * S)}px VT323, monospace`;
       ctx.fillStyle = '#ffb000';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -1100,12 +1335,12 @@ function playEject(audioRef) {
 // ═══════════════════════════════════════════════════════════════
 
 // ── MeterBar ──────────────────────────────────────────────────
-function MeterBar({ label, value, isMeds, medicated }) {
+function MeterBar({ label, value, isMeds, medicated, compact }) {
   if (isMeds) {
     const taken = medicated;
     return (
-      <div style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, marginBottom: 2 }}>
+      <div style={{ marginBottom: compact ? 0 : 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: compact ? 17 : 20, marginBottom: 2 }}>
           <span>MEDS</span>
           <span style={{ color: taken ? '#39ff14' : '#ffb000' }}>
             {taken ? '[ TAKEN ]' : '[ NOT TAKEN ]'}
@@ -1119,20 +1354,41 @@ function MeterBar({ label, value, isMeds, medicated }) {
   const segments = 12;
   const filled = Math.round((pct / 100) * segments);
   const bar = '█'.repeat(filled) + '░'.repeat(segments - filled);
-  const flashClass = pct < 10 ? 'flash-red' : pct < 25 ? 'flash-amber' : '';
+  const flashClass = REDUCED_MOTION ? '' : (pct < 10 ? 'flash-red' : pct < 25 ? 'flash-amber' : '');
 
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, marginBottom: 2 }}>
+    <div style={{ marginBottom: compact ? 0 : 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, fontSize: compact ? 17 : 20, marginBottom: 2 }}>
         <span className={flashClass}>{label}</span>
-        <span className={flashClass} style={{ fontFamily: 'monospace', letterSpacing: 1 }}>{bar}</span>
+        <span className={flashClass} style={{ fontFamily: 'monospace', letterSpacing: compact ? 0 : 1, fontSize: compact ? 12 : 'inherit' }}>{bar}</span>
       </div>
     </div>
   );
 }
 
 // ── LeftPanel ─────────────────────────────────────────────────
-function LeftPanel({ meters, medicated }) {
+function LeftPanel({ meters, medicated, horizontal }) {
+  const bars = [
+    <MeterBar key="b" label="BLADDER" value={meters.bladder} compact={horizontal} />,
+    <MeterBar key="h" label="HUNGER" value={meters.hunger} compact={horizontal} />,
+    <MeterBar key="t" label="THIRST" value={meters.thirst} compact={horizontal} />,
+    <MeterBar key="f" label="FATIGUE" value={meters.fatigue} compact={horizontal} />,
+    <MeterBar key="m" label="MEDS" isMeds={true} medicated={medicated} compact={horizontal} />,
+  ];
+
+  if (horizontal) {
+    return (
+      <div style={{
+        background: 'rgba(0,0,0,0.6)',
+        border: '1px solid rgba(57,255,20,0.3)',
+        padding: '6px 8px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+        gap: '2px 14px',
+      }}>{bars}</div>
+    );
+  }
+
   return (
     <div style={{
       background: 'rgba(0,0,0,0.6)',
@@ -1146,46 +1402,49 @@ function LeftPanel({ meters, medicated }) {
       <div style={{ fontSize: 20, marginBottom: 12, borderBottom: '1px solid rgba(57,255,20,0.2)', paddingBottom: 6, letterSpacing: 2 }}>
         [ BODY SYS ]
       </div>
-      <MeterBar label="BLADDER" value={meters.bladder} />
-      <MeterBar label="HUNGER" value={meters.hunger} />
-      <MeterBar label="THIRST" value={meters.thirst} />
-      <MeterBar label="FATIGUE" value={meters.fatigue} />
-      <MeterBar label="MEDS" isMeds={true} medicated={medicated} />
+      {bars}
     </div>
   );
 }
 
 // ── TemporalClock ─────────────────────────────────────────────
-function TemporalClock({ gameTime, drive, hyperfocus }) {
-  const SESSION_START_HOUR = 7 * 3600000; // 07:00 in ms
-  const actualMs = SESSION_START_HOUR + gameTime;
-  const perceivedMs = hyperfocus
-    ? SESSION_START_HOUR + gameTime * 3.5
-    : drive > 70
-    ? SESSION_START_HOUR + gameTime * 0.5
-    : drive < 20
-    ? SESSION_START_HOUR + gameTime * 2
-    : SESSION_START_HOUR + gameTime;
+function TemporalClock({ gameTime, perceivedMs, drive, hyperfocus, waitingMode }) {
+  const actualMs = SESSION.START_MS + gameTime;
+  const perceived = SESSION.START_MS + (perceivedMs || 0);
+  const remaining = Math.max(0, SESSION.END_MS - actualMs);
 
-  function msToTime(ms) {
-    const totalSecs = Math.floor(ms / 1000);
-    const h = Math.floor(totalSecs / 3600) % 24;
-    const m = Math.floor((totalSecs % 3600) / 60);
-    const s = totalSecs % 60;
-    return { h, m, s };
-  }
-
-  const { h: ah, m: am, s: as } = msToTime(actualMs);
-  const { h: ph, m: pm, s: ps } = msToTime(perceivedMs);
   const pad = n => String(n).padStart(2, '0');
+  function parts(ms) {
+    const t = Math.floor(ms / 1000);
+    return { h: Math.floor(t / 3600) % 24, m: Math.floor((t % 3600) / 60), s: t % 60 };
+  }
+  const a = parts(actualMs);
+  const pv = parts(perceived);
+  const rem = parts(remaining);
+  const urgent = remaining < 20 * 60 * 1000;
 
   return (
     <div style={{ marginBottom: 10, fontSize: 15 }}>
       <div style={{ opacity: 0.6, fontSize: 21, marginBottom: 3 }}>CLOCK</div>
-      <div>ACTUAL  <span>{pad(ah)}</span><span className="blink">:</span><span>{pad(am)}</span><span className="blink">:</span><span>{pad(as)}</span></div>
-      <div style={{ color: hyperfocus ? '#a855f7' : drive > 70 ? '#00cfff' : drive < 20 ? '#ff8c00' : '#39ff14' }}>
-        PERCEIVED <span>{pad(ph)}</span><span className="blink">:</span><span>{pad(pm)}</span><span className="blink">:</span><span>{pad(ps)}</span>
+      <div>ACTUAL  <span>{pad(a.h)}</span><span className="blink">:</span><span>{pad(a.m)}</span></div>
+      <div style={{ color: hyperfocus ? '#a855f7' : drive > 70 ? '#00cfff' : drive < 20 ? '#ff8c00' : C.PRIMARY }}>
+        FELT LIKE <span>{pad(pv.h)}</span><span className="blink">:</span><span>{pad(pv.m)}</span>
       </div>
+      <div style={{ color: urgent ? C.RED : C.PRIMARY_DIM, marginTop: 2 }}>
+        LEFT    {pad(rem.h)}:{pad(rem.m)}
+      </div>
+      {waitingMode && (
+        <div style={{
+          marginTop: 6, padding: '4px 6px', fontSize: 17, letterSpacing: 1,
+          border: '1px solid rgba(255,176,0,0.5)', color: C.AMBER,
+          background: 'rgba(255,176,0,0.06)',
+        }}>
+          <span className={REDUCED_MOTION ? '' : 'flash-amber'}>APPOINTMENT 08:30</span>
+          <div style={{ fontSize: 15, opacity: 0.75, letterSpacing: 0 }}>
+            can't start anything until it's over
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1268,19 +1527,35 @@ function TaskList({ tasks, selectedTaskId, onSelectTask, hyperfocus }) {
 }
 
 // ── SessionScore ──────────────────────────────────────────────
-function SessionScore({ score, tasks, elapsedMs }) {
+function SessionScore({ tasks, onEndEarly }) {
   const done = tasks.filter(t => t.status === 'complete').length;
-  const total = tasks.length;
-  const mm = String(Math.floor(elapsedMs / 60000)).padStart(2, '0');
-  const ss = String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, '0');
+  const forgotten = tasks.filter(t => t.status === 'forgotten').length;
+  const reaches = tasks.reduce((a, t) => a + (t.abandonedReaches || 0), 0);
 
+  const row = { display: 'flex', justifyContent: 'space-between' };
   return (
-    <div style={{ fontSize: 21, borderTop: '1px solid rgba(57,255,20,0.2)', paddingTop: 8 }}>
-      <div style={{ opacity: 0.6, fontSize: 21, marginBottom: 4 }}>SESSION SCORE</div>
-      <div>WELLBEING    <span style={{ float: 'right' }}>{Math.round(score.wellbeing)}</span></div>
-      <div>EXEC FUNC    <span style={{ float: 'right' }}>{Math.round(score.execFunction)}</span></div>
-      <div>TASKS DONE   <span style={{ float: 'right' }}>{done}/{total}</span></div>
-      <div>ELAPSED      <span style={{ float: 'right' }}>{mm}:{ss}</span></div>
+    <div style={{ fontSize: 19, borderTop: '1px solid rgba(57,255,20,0.2)', paddingTop: 8 }}>
+      <div style={{ opacity: 0.6, fontSize: 21, marginBottom: 4 }}>THIS MORNING</div>
+      <div style={row}><span>FINISHED</span><span>{done}/{tasks.length}</span></div>
+      <div style={{ ...row, color: forgotten ? C.RED : 'inherit' }}>
+        <span>FORGOTTEN</span><span>{forgotten}</span>
+      </div>
+      <div style={{ ...row, color: reaches ? C.AMBER : 'inherit' }}>
+        <span>GAVE UP STARTING</span><span>{reaches}</span>
+      </div>
+      {onEndEarly && (
+        <button
+          onClick={onEndEarly}
+          style={{
+            marginTop: 10, width: '100%', background: 'transparent',
+            border: '1px solid rgba(57,255,20,0.3)', color: C.PRIMARY_DIM,
+            fontFamily: 'VT323, monospace', fontSize: 18, padding: '5px',
+            cursor: 'pointer', letterSpacing: 2,
+          }}
+          onMouseOver={e => { e.currentTarget.style.background = 'rgba(57,255,20,0.08)'; }}
+          onMouseOut={e => { e.currentTarget.style.background = 'transparent'; }}
+        >[ LEAVE NOW ]</button>
+      )}
     </div>
   );
 }
@@ -1298,7 +1573,7 @@ function EventLog({ events }) {
 }
 
 // ── RightPanel ────────────────────────────────────────────────
-function RightPanel({ gameTime, drive, tasks, selectedTaskId, onSelectTask, score, elapsedMs, lastDriveEvent, eventLog, mood, hyperfocus }) {
+function RightPanel({ gameTime, perceivedMs, waitingMode, drive, tasks, selectedTaskId, onSelectTask, elapsedMs, lastDriveEvent, eventLog, mood, hyperfocus, onEndEarly }) {
   const dimStyle = { opacity: hyperfocus ? 0.12 : 1, transition: 'opacity 1.2s ease' };
   return (
     <div style={{
@@ -1314,19 +1589,18 @@ function RightPanel({ gameTime, drive, tasks, selectedTaskId, onSelectTask, scor
         [ STATUS ]
       </div>
       {mood < 100 && (
-        <div style={{ ...dimStyle, marginBottom: 8, fontSize: 13 }}>
-          MOOD <span style={{ color: mood < 80 ? '#ff3131' : '#ffb000' }}>{mood < 0 ? mood : '+0'}/{100}</span>
-          <span style={{ float: 'right' }}>{mood}</span>
+        <div style={{ ...dimStyle, marginBottom: 8, fontSize: 19 }}>
+          MOOD <span style={{ float: 'right', color: mood < 80 ? C.RED : C.AMBER }}>{mood}/100</span>
         </div>
       )}
-      <TemporalClock gameTime={gameTime} drive={drive} hyperfocus={hyperfocus} />
+      <TemporalClock gameTime={gameTime} perceivedMs={perceivedMs} drive={drive} hyperfocus={hyperfocus} waitingMode={waitingMode} />
       <div style={dimStyle}>
         <DriveBar drive={drive} lastEvent={lastDriveEvent} />
       </div>
       <TaskList tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} hyperfocus={hyperfocus} />
       <div style={dimStyle}>
         <EventLog events={eventLog} />
-        <SessionScore score={score} tasks={tasks} elapsedMs={elapsedMs} />
+        <SessionScore tasks={tasks} onEndEarly={onEndEarly} />
       </div>
     </div>
   );
@@ -1723,7 +1997,7 @@ function ActivityMap({
     return () => ro.disconnect();
   }, []);
 
-  const handleMouseDown = useCallback((e) => {
+  const handlePointerDown = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas || !physicsRef.current) return;
     initAudio(audioRef);
@@ -1772,7 +2046,7 @@ function ActivityMap({
     }
   }, []);
 
-  const handleMouseMove = useCallback((e) => {
+  const handlePointerMove = useCallback((e) => {
     const canvas = canvasRef.current;
     if (!canvas || !physicsRef.current) return;
     const pos = getCanvasPos(e, canvas);
@@ -1807,12 +2081,12 @@ function ActivityMap({
 
       // Tasks that have been in the box before bypass the initiation barrier
       const alreadyStarted = node.decaying || node.timeInBox > 0;
+      node.holdBypass = alreadyStarted;
 
       // Hold-to-snap: cursor must stay inside box for this long before node pops in
       // If an exclusive task is currently active in the box, initiation energy is infinite!
       const isBlockedByExclusive = phys.exclusiveTaskActive && phys.exclusiveTaskActive !== node.id;
 
-      const HOLD_REQUIRED_MS = isBlockedByExclusive ? Infinity : (alreadyStarted ? 0 : costMod * 3200);
       const REPULSION_RADIUS = isBlockedByExclusive ? 450 : (alreadyStarted ? 0 : 300);
 
       // Vector from box centre to desired node position
@@ -1865,104 +2139,31 @@ function ActivityMap({
       }
 
       if (cursorInBox) {
-        // Cursor inside box — hold timer runs, node pinned to box edge
-        if (isBlockedByExclusive) {
-          node.blockedByExclusive = true;
-          node.snapProgress = 0;
-          ds.holdStart = null;
-        } else {
-          node.blockedByExclusive = false;
-          if (!ds.holdStart) ds.holdStart = Date.now();
-          const held = Date.now() - ds.holdStart;
-          node.snapProgress = Math.min(1, held / HOLD_REQUIRED_MS);
-
-          if (held >= HOLD_REQUIRED_MS) {
-            // ── SNAP IN ──
-            node.x = phys.focusBox.x;
-            node.y = phys.focusBox.y;
-            node.vx = 0;
-            node.vy = 0;
-            node.isInBox = true;
-            node.dragging = false;
-            node.timeInBox = 0;
-            node.decaying = false;
-            node.decayTimer = 0;
-            node.snapFlash = 500;
-            // Exclusive/Body task: eject everything else from box and claim exclusivity
-            if (isExclusiveNode(node)) {
-              phys.exclusiveTaskActive = node.id;
-              if (node.isBodyTask) {
-                phys.bodyTaskActive = node.bodyKey;
-              }
-              phys.taskNodes.forEach(n => {
-                if (n.isInBox && n.id !== node.id) {
-                  n.isInBox = false;
-                  n.vx = (Math.random() - 0.5) * 10;
-                  n.vy = (Math.random() - 0.5) * 10;
-                  n.decaying = true; n.decayTimer = 0;
-                }
-              });
-            }
-            node.snapProgress = 0;
-            ds.type = null;
-            ds.holdStart = null;
-            playSnap(audioRef);
-            // Hyperfocus trigger — only on eligible tasks, only once per session
-            if (node.canHyperfocus && !phys.hyperfocus && !phys.forcedEventFired['hyperfocus_' + node.id] && Math.random() < (node.hyperfocusProbability || 0)) {
-              phys.forcedEventFired['hyperfocus_' + node.id] = true;
-              phys.hyperfocus = true;
-              phys.hyperfocusTaskId = node.id;
-              // Eject all other in-box tasks
-              phys.taskNodes.forEach(n => {
-                if (n.isInBox && n.id !== node.id) {
-                  n.isInBox = false;
-                  n.vx = (Math.random() - 0.5) * 10;
-                  n.vy = (Math.random() - 0.5) * 10;
-                  n.decaying = true; n.decayTimer = 0;
-                }
-              });
-              // Pick 4 nagging thoughts, spread across canvas
-              const cw = canvas ? canvas.width : 800;
-              const ch = canvas ? canvas.height : 600;
-              const shuffled = [...HYPERFOCUS_NAGGING].sort(() => Math.random() - 0.5).slice(0, 4);
-              phys.nagThoughts = shuffled.map((n, i) => {
-                const margin = 80;
-                return {
-                  ...n,
-                  x: margin + Math.random() * (cw - margin * 2),
-                  y: margin + Math.random() * (ch - margin * 2),
-                  alpha: 0,
-                  speed: 0.25 + Math.random() * 0.5,
-                  phase: Math.random() * Math.PI * 2,
-                };
-              });
-            }
-            if (node.conversationEvent && !phys.forcedEventFired['conv_' + node.id]) {
-              phys.forcedEventFired['conv_' + node.id] = true;
-              phys.pendingOverlay = { type: 'conversation', nodeId: node.id, data: node.conversationData };
-            }
-            if (node.id === 'email_volunteer' && !phys.forcedEventFired['email_select']) {
-              phys.forcedEventFired['email_select'] = true;
-              phys.pendingOverlay = { type: 'name_select', nodeId: node.id, data: node.conversationData || morningTasks.find(t => t.id === 'meet_volunteer').conversationData };
-            }
-            if (node.id === 'tell_partner_keys' && !phys.forcedEventFired['location_tell']) {
-              phys.forcedEventFired['location_tell'] = true;
-              phys.pendingOverlay = { type: 'location_tell', nodeId: node.id, data: { correctLocation: phys.keysActualLocation } };
-            }
-            return;
-          }
+        // Cursor inside box. Record the intent — the physics loop advances the
+        // hold, so it keeps running (and keeps fighting you) even if you hold
+        // the pointer perfectly still.
+        node.blockedByExclusive = false;
+        node.holdActive = true;
+        node.holdCursorX = pos.x;
+        node.holdCursorY = pos.y;
+        if (node.holdAnchorX == null) {
+          node.holdAnchorX = pos.x;
+          node.holdAnchorY = pos.y;
+          node.holdMs = node.holdMs || 0;
+          node.reachCounted = false;
         }
-
-        // Pin node to box boundary in the approach direction
-        // Find point on box edge along the vector from box centre to cursor
-        const scaleX = halfW / (Math.abs(bdx) || 0.001);
-        const scaleY = halfH / (Math.abs(bdy) || 0.001);
-        const scale = Math.min(scaleX, scaleY);
-        node.x = phys.focusBox.x + bdx * scale;
-        node.y = phys.focusBox.y + bdy * scale;
+        // Position is driven by physics while holding (it wanders) — don't set it here.
 
       } else {
-        // Cursor outside box — reset hold timer, apply repulsion
+        // Cursor outside box — the hold bleeds away, repulsion applies
+        if (node.holdActive) {
+          node.reachedFor = (node.reachedFor || 0) + (node.reachCounted ? 0 : 1);
+          node.reachCounted = true;
+        }
+        node.holdActive = false;
+        node.holdAnchorX = null;
+        node.holdAnchorRelX = null;
+        node.holdMs = 0;
         ds.holdStart = null;
         node.snapProgress = 0;
         node.blockedByExclusive = false;
@@ -1970,7 +2171,6 @@ function ActivityMap({
         if (bDist < REPULSION_RADIUS) {
           // Exponential repulsion: strongest near box edge, fades to zero at radius
           const proximity = 1 - (bDist / REPULSION_RADIUS);
-          // push magnitude: strong repulsion if blocked by exclusive
           const pushFactor = isBlockedByExclusive ? 40.0 : costMod;
           const push = proximity * proximity * pushFactor * 260;
           node.x = desiredX + (bdx / bDist) * push;
@@ -2046,7 +2246,7 @@ function ActivityMap({
     }
   }, []);
 
-  const handleMouseUp = useCallback(() => {
+  const handlePointerUp = useCallback(() => {
     const phys = physicsRef.current;
     if (!phys) return;
     const ds = dragStateRef.current;
@@ -2057,13 +2257,11 @@ function ActivityMap({
         node.dragging = false;
         node.snapProgress = 0; // Reset hold progress on release
         
-        console.log(`[Telemetry] handleMouseUp for intrusive node. ID: ${node.id}, isInBox: ${node.isInBox}, dragsLeft: ${node.dragsLeft}`);
         // Dragging a distraction away (so it is outside the box) and releasing it always counts as a drag-away!
         if (!node.isInBox) {
           if (node.dragsLeft > 1) {
             node.dragsLeft -= 1;
             node.progress = node.dragsLeft / (node.maxDrags || 3);
-            console.log(`[Telemetry] Distraction drag-away. ID: ${node.id}, Remaining dragsLeft: ${node.dragsLeft}`);
             
             // Push away velocity: a gentle push away from the box so it starts drifting back in
             const dx = node.x - phys.focusBox.x;
@@ -2083,7 +2281,6 @@ function ActivityMap({
             node.vx = (dx / dist) * 18;
             node.vy = (dy / dist) * 18;
             node.ejected = true;
-            console.log(`[Telemetry] Distraction DEFEATED. ID: ${node.id}, flying off-screen.`);
             
             if (node.rewarding) {
               driveRef.current = clamp(driveRef.current - 5, 0, 100);
@@ -2095,7 +2292,17 @@ function ActivityMap({
     } else if (ds.type === 'task') {
       const node = phys.taskNodes.find(n => n.id === ds.nodeId);
       if (node) {
+        // Let go mid-hold: you reached for it and didn't start it. This is the
+        // single most honest number the debrief has, so count it carefully.
+        if (node.holdActive && node.snapProgress > 0.05 && !node.holdBypass) {
+          node.abandonedReaches = (node.abandonedReaches || 0) + 1;
+          phys.totalAbandonedReaches = (phys.totalAbandonedReaches || 0) + 1;
+        }
         node.dragging = false;
+        node.holdActive = false;
+        node.holdAnchorX = null;
+        node.holdAnchorRelX = null;
+        node.holdMs = 0;
         node.snapProgress = 0;
       }
     }
@@ -2118,11 +2325,12 @@ function ActivityMap({
       </div>
       <canvas
         ref={canvasRef}
-        style={{ display: 'block', width: '100%', height: '100%', pointerEvents: canvasPointerEvents }}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        style={{ display: 'block', width: '100%', height: '100%', touchAction: 'none', pointerEvents: canvasPointerEvents }}
+        onPointerDown={e => { e.currentTarget.setPointerCapture(e.pointerId); handlePointerDown(e); }}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={handlePointerUp}
       />
       {activeOverlay === 'conversation' && overlayData && (
         <ConversationOverlay
@@ -2156,8 +2364,8 @@ function ActivityMap({
 }
 
 // ── ConfigScreen ──────────────────────────────────────────────
-function ConfigScreen({ onBegin }) {
-  const [profile, setProfile] = useState({
+function ConfigScreen({ onBegin, initial }) {
+  const [profile, setProfile] = useState(initial || {
     focusLevel: 0.4,
     impulsivity: 0.7,
     workingMemory: 0.3,
@@ -2167,43 +2375,55 @@ function ConfigScreen({ onBegin }) {
     distractability: 0.6,
   });
 
+  // Each slider says what it actually does to the simulation. Abstract numbers
+  // with no stated mechanic are just a stat block, and this isn't a character sheet.
   const sliders = [
-    { key: 'focusLevel', label: 'FOCUS LEVEL', min: 0.1, max: 1.0, step: 0.05 },
-    { key: 'impulsivity', label: 'IMPULSIVITY', min: 0.1, max: 1.0, step: 0.05 },
-    { key: 'workingMemory', label: 'WORKING MEMORY', min: 0.1, max: 1.0, step: 0.05 },
-    { key: 'rewardSensitivity', label: 'REWARD SENSITIVITY', min: 0.1, max: 1.0, step: 0.05 },
-    { key: 'initiationCost', label: 'INITIATION COST', min: 0.1, max: 1.0, step: 0.05 },
-    { key: 'distractability', label: 'DISTRACTABILITY', min: 0.1, max: 1.0, step: 0.05 },
+    { key: 'focusLevel', label: 'FOCUS', min: 0.1, max: 1.0, step: 0.05,
+      note: 'size of the focus box, and how much it wanders on its own' },
+    { key: 'initiationCost', label: 'INITIATION COST', min: 0.1, max: 1.0, step: 0.05,
+      note: 'how long you must hold a task before it will start, and how hard it fights' },
+    { key: 'workingMemory', label: 'WORKING MEMORY', min: 0.1, max: 1.0, step: 0.05,
+      note: 'how fast a half-done task decays once it leaves the box' },
+    { key: 'distractability', label: 'DISTRACTABILITY', min: 0.1, max: 1.0, step: 0.05,
+      note: 'how hard intrusive thoughts shove your work out of the way' },
+    { key: 'impulsivity', label: 'IMPULSIVITY', min: 0.1, max: 1.0, step: 0.05,
+      note: 'how often intrusive thoughts arrive, and how fast they close in' },
+    { key: 'rewardSensitivity', label: 'REWARD SENSITIVITY', min: 0.1, max: 1.0, step: 0.05,
+      note: 'how much the interesting thing pulls compared to the necessary one' },
   ];
 
   return (
     <div style={{
-      width: '100vw', height: '100vh',
+      width: '100vw', height: '100dvh',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       background: '#0a0a0a',
+      padding: 'clamp(10px, 3vw, 24px)',
+      boxSizing: 'border-box',
     }}>
       <div style={{
         width: '100%', maxWidth: 600,
+        maxHeight: '92dvh', overflowY: 'auto',
         border: '1px solid rgba(57,255,20,0.4)',
         background: 'rgba(0,0,0,0.8)',
         padding: '32px 36px',
         fontFamily: 'VT323, monospace',
         color: '#39ff14',
       }}>
-        <div style={{ fontSize: 28, letterSpacing: 4, marginBottom: 4 }}>ADHD MIND SIMULATOR</div>
-        <div style={{ fontSize: 20, opacity: 0.5, marginBottom: 4, letterSpacing: 2 }}>v1.0 — MORNING SESSION</div>
+        <div style={{ fontSize: 28, letterSpacing: 4, marginBottom: 4 }}>PARAMETERS</div>
         <div style={{ borderBottom: '1px solid rgba(57,255,20,0.2)', marginBottom: 24, paddingBottom: 8, fontSize: 18, opacity: 0.6, lineHeight: 1.5 }}>
-          A physics simulation of ADHD cognition. Drag tasks into the Focus Box to work on them. Keep them there to make progress.
+          The defaults are the ones worth playing first. Change them and the morning
+          changes — which is the whole argument, really.
         </div>
 
-        {sliders.map(({ key, label, min, max, step }) => (
-          <div key={key} style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 16 }}>
+        {sliders.map(({ key, label, min, max, step, note }) => (
+          <div key={key} style={{ marginBottom: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2, fontSize: 20 }}>
               <span>{label}</span>
               <span style={{ opacity: 0.7 }}>{profile[key].toFixed(2)}</span>
             </div>
+            <div style={{ fontSize: 15, opacity: 0.42, marginBottom: 6, lineHeight: 1.35 }}>{note}</div>
             <input
               type="range"
               min={min} max={max} step={step}
@@ -2257,52 +2477,534 @@ function ConfigScreen({ onBegin }) {
 }
 
 // ── GameLayout ────────────────────────────────────────────────
+function useIsNarrow(breakpoint) {
+  const bp = breakpoint || 860;
+  const [narrow, setNarrow] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < bp : false
+  );
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < bp);
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, [bp]);
+  return narrow;
+}
+
 function GameLayout({
-  meters, drive, tasks, gameTime, score, elapsedMs,
+  meters, drive, tasks, gameTime, perceivedMs, waitingMode, elapsedMs,
   selectedTaskId, onSelectTask, lastDriveEvent, eventLog, mood,
   physicsRef, profileRef, driveRef, audioRef, medicated,
   activeOverlay, overlayData, onOverlayEvent,
-  pendingInitRef, initPhysics, hyperfocus,
+  pendingInitRef, initPhysics, hyperfocus, onEndEarly,
 }) {
+  const narrow = useIsNarrow(860);
+  const [panelOpen, setPanelOpen] = useState(false);
   const panelOpacity = hyperfocus ? 0.12 : 1;
-  const panelTransition = 'opacity 1.2s ease';
+  const panelTransition = REDUCED_MOTION ? 'none' : 'opacity 1.2s ease';
+
+  const map = (
+    <ActivityMap
+      physicsRef={physicsRef}
+      profileRef={profileRef}
+      driveRef={driveRef}
+      audioRef={audioRef}
+      activeOverlay={activeOverlay}
+      overlayData={overlayData}
+      onOverlayEvent={onOverlayEvent}
+      pendingInitRef={pendingInitRef}
+      initPhysics={initPhysics}
+    />
+  );
+
+  const right = (
+    <RightPanel
+      gameTime={gameTime}
+      perceivedMs={perceivedMs}
+      waitingMode={waitingMode}
+      drive={drive}
+      tasks={tasks}
+      selectedTaskId={selectedTaskId}
+      onSelectTask={onSelectTask}
+      elapsedMs={elapsedMs}
+      lastDriveEvent={lastDriveEvent}
+      eventLog={eventLog}
+      mood={mood}
+      hyperfocus={hyperfocus}
+      onEndEarly={onEndEarly}
+    />
+  );
+
+  // ── Narrow: the map gets the screen, everything else is a sheet ──
+  if (narrow) {
+    return (
+      <div style={{
+        width: '100vw', height: '100dvh',
+        display: 'flex', flexDirection: 'column',
+        background: C.BG, padding: 4, gap: 4, boxSizing: 'border-box',
+      }}>
+        <div style={{ opacity: panelOpacity, transition: panelTransition, flexShrink: 0 }}>
+          <LeftPanel meters={meters} medicated={medicated} horizontal />
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+          {map}
+        </div>
+
+        <button
+          onClick={() => setPanelOpen(o => !o)}
+          style={{
+            flexShrink: 0, background: 'rgba(0,0,0,0.6)',
+            border: '1px solid rgba(57,255,20,0.3)', color: C.PRIMARY,
+            fontFamily: 'VT323, monospace', fontSize: 20, padding: '7px',
+            letterSpacing: 2, cursor: 'pointer',
+            opacity: panelOpacity, transition: panelTransition,
+          }}
+        >
+          {panelOpen ? '[ HIDE LIST ▼ ]' : '[ THE LIST ▲ ]'}
+        </button>
+
+        {panelOpen && (
+          <div style={{
+            flexShrink: 0, maxHeight: '52dvh', overflowY: 'auto',
+            opacity: panelOpacity, transition: panelTransition,
+          }}>
+            {right}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Wide: the original three-column terminal ──
   return (
     <div style={{
-      width: '100vw', height: '100vh',
+      width: '100vw', height: '100dvh',
       display: 'grid',
-      gridTemplateColumns: '240px 1fr 260px',
+      gridTemplateColumns: 'minmax(200px, 240px) 1fr minmax(220px, 280px)',
       gridGap: 4,
       padding: 8,
-      background: '#0a0a0a',
+      background: C.BG,
       boxSizing: 'border-box',
     }}>
-      <div style={{ opacity: panelOpacity, transition: panelTransition }}>
+      <div style={{ opacity: panelOpacity, transition: panelTransition, minHeight: 0 }}>
         <LeftPanel meters={meters} medicated={medicated} />
       </div>
-      <ActivityMap
-        physicsRef={physicsRef}
-        profileRef={profileRef}
-        driveRef={driveRef}
-        audioRef={audioRef}
-        activeOverlay={activeOverlay}
-        overlayData={overlayData}
-        onOverlayEvent={onOverlayEvent}
-        pendingInitRef={pendingInitRef}
-        initPhysics={initPhysics}
-      />
-      <RightPanel
-        gameTime={gameTime}
-        drive={drive}
-        tasks={tasks}
-        selectedTaskId={selectedTaskId}
-        onSelectTask={onSelectTask}
-        score={score}
-        elapsedMs={elapsedMs}
-        lastDriveEvent={lastDriveEvent}
-        eventLog={eventLog}
-        mood={mood}
-        hyperfocus={hyperfocus}
-      />
+      {map}
+      <div style={{ minHeight: 0 }}>{right}</div>
+    </div>
+  );
+}
+
+// ── Session ledger ────────────────────────────────────────────
+// Everything the debrief needs, harvested from physics state at session end.
+function buildLedger(phys, extra) {
+  const nodes = phys ? phys.taskNodes : [];
+  const rows = nodes.map(n => ({
+    id: n.id,
+    label: n.label,
+    status: n.status,
+    progress: n.progress || 0,
+    urgency: n.urgency,
+    isBodyTask: !!n.isBodyTask,
+    abandonedReaches: n.abandonedReaches || 0,
+    startedCount: n.startedCount || 0,
+    timeInBox: n.timeInBox || 0,
+  }));
+
+  const done = rows.filter(r => r.status === 'complete');
+  const forgotten = rows.filter(r => r.status === 'forgotten');
+  const started = rows.filter(r => r.status !== 'complete' && r.progress > 0.02);
+  const untouched = rows.filter(r => r.status !== 'complete' && r.progress <= 0.02 && r.status !== 'forgotten');
+
+  // The most telling row: reached for repeatedly, never begun.
+  const reachedNeverStarted = rows
+    .filter(r => r.abandonedReaches > 0 && r.startedCount === 0)
+    .sort((a, b) => b.abandonedReaches - a.abandonedReaches);
+
+  return {
+    rows, done, forgotten, started, untouched, reachedNeverStarted,
+    totalAbandonedReaches: phys ? (phys.totalAbandonedReaches || 0) : 0,
+    totalHoldMs: phys ? (phys.totalHoldMs || 0) : 0,
+    hyperfocusMs: phys ? (phys.hyperfocusTotalMs || 0) : 0,
+    hyperfocusTask: phys ? phys.hyperfocusTaskLabel : null,
+    thoughtsLost: phys ? (phys.thoughtsLostCount || 0) : 0,
+    distractionsLanded: phys ? (phys.distractionsLandedCount || 0) : 0,
+    metersCritical: phys ? (phys.metersHitCritical || []) : [],
+    ...extra,
+  };
+}
+
+function fmtClock(ms) {
+  const t = Math.floor(ms / 1000);
+  const h = Math.floor(t / 3600) % 24;
+  const m = Math.floor((t % 3600) / 60);
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+function fmtMins(ms) {
+  const m = Math.round(ms / 60000);
+  return m + ' min' + (m === 1 ? '' : 's');
+}
+
+// ── The explanations ──────────────────────────────────────────
+// Each note only appears if the thing it describes actually happened to this
+// player, in this session. Nothing here is generic.
+const DEBRIEF_NOTES = [
+  {
+    id: 'reaching',
+    test: L => L.totalAbandonedReaches >= 2,
+    title: 'YOU REACHED FOR THINGS AND DIDN’T START THEM',
+    body: L => {
+      const worst = L.reachedNeverStarted[0];
+      const lead = 'You began the motion of starting a task ' + L.totalAbandonedReaches +
+        ' time' + (L.totalAbandonedReaches === 1 ? '' : 's') + ' and let go before it committed.';
+      const named = worst
+        ? ' ' + worst.label + ' took ' + worst.abandonedReaches + ' attempt' +
+          (worst.abandonedReaches === 1 ? '' : 's') + ' and never started at all.'
+        : '';
+      return lead + named + ' This is the part people outside it never see, because from the outside ' +
+        'nothing happened. You knew what the task was. You knew how to do it. You wanted it done. ' +
+        'The distance between all of that and beginning is not laziness and it is not a decision — ' +
+        'it is the thing itself.';
+    },
+  },
+  {
+    id: 'forgotten',
+    test: L => L.forgotten.length > 0,
+    title: 'THINGS LEFT THE EDGE OF THE SCREEN',
+    body: L => {
+      const names = L.forgotten.map(r => r.label).join(', ');
+      return names + ' drifted out of view and stopped existing. They were never decided against. ' +
+        'Nothing was weighed up. They simply left the space where things you are aware of are kept, ' +
+        'and the awareness went with them. You will remember them tonight, in bed, all at once.';
+    },
+  },
+  {
+    id: 'interrupt',
+    test: L => L.thoughtsLost > 0,
+    title: 'THE THREAD WAS CUT ' + '' ,
+    dynamicTitle: L => 'THE THREAD WAS CUT ' + L.thoughtsLost + '×',
+    body: L => 'A distraction reached the focus box ' + L.distractionsLanded + ' time' +
+      (L.distractionsLanded === 1 ? '' : 's') + ', and on ' + L.thoughtsLost + ' of those the task you ' +
+      'were holding vanished entirely — not paused, gone — and came back twenty to forty-five ' +
+      'seconds later on its own. That delay is the honest part. The interruption costs a second. ' +
+      'Getting back is what costs the morning.',
+  },
+  {
+    id: 'hyperfocus',
+    test: L => L.hyperfocusMs > 3000,
+    dynamicTitle: L => 'HYPERFOCUS: ' + fmtMins(L.hyperfocusMs * PHYSICS.GAME_TIME_MULT) + ' GONE',
+    body: L => {
+      const t = L.hyperfocusTask ? '“' + L.hyperfocusTask + '”' : 'one task';
+      return 'For a stretch of the morning you were completely inside ' + t + '. The panels dimmed ' +
+        'because you genuinely could not see them. Everything else on the list kept existing and you ' +
+        'did not. This is the trait that gets called a superpower by people who have not had to live ' +
+        'around it. Look at what the body meters did while it was happening. You did not choose to ' +
+        'enter it and you could not choose to leave.';
+    },
+  },
+  {
+    id: 'time',
+    test: L => Math.abs(L.perceivedDriftMs) > 8 * 60 * 1000,
+    dynamicTitle: L => L.perceivedDriftMs > 0 ? 'YOU THOUGHT YOU HAD MORE TIME' : 'IT FELT LONGER THAN IT WAS',
+    body: L => {
+      const mins = fmtMins(Math.abs(L.perceivedDriftMs));
+      return 'The clock ran two readings all morning. By the end they were ' + mins + ' apart. ' +
+        'Time is not experienced as a quantity you can check against — it is experienced as ' +
+        'how absorbed you are, which means it is unreliable exactly when it matters most. ' +
+        'You were not ignoring the clock. You were reading a different one.';
+    },
+  },
+  {
+    id: 'waiting',
+    test: L => L.enteredWaitingMode,
+    title: 'WAITING MODE',
+    body: () => 'From 08:00 there was something at 08:30, and everything got harder to start. ' +
+      'Not the thing itself — everything else. An hour is not an hour when there is an ' +
+      'appointment in it; it is an unusable block you spend guarding against forgetting. ' +
+      'People will ask why you didn’t do anything with all that time. There was no time. ' +
+      'There was a thing at half eight.',
+  },
+  {
+    id: 'keys',
+    test: L => L.keysEventFired,
+    title: 'THE KEYS',
+    body: () => 'The task completed. It genuinely completed — the keys went somewhere and the ' +
+      'line went green. What did not happen was the encoding: at the moment the action finished, ' +
+      'attention was already elsewhere, so the location was never written down anywhere in you. ' +
+      'There was no lapse in care. There was no point at which you could have tried harder. ' +
+      'The information was simply never recorded, and every option you were offered afterwards ' +
+      'was wrong because there was no right one to offer.',
+  },
+  {
+    id: 'name',
+    test: L => L.nameEventFired,
+    title: 'JAMIE',
+    body: () => 'They told you their name, and that they preferred email, and that the name they use ' +
+      'is Jamie. You were listening. Being interested is not the same as retaining, and the five ' +
+      'options you were given were all wrong on purpose, because the true one was never stored. ' +
+      'The apology you send afterwards costs more than the mistake, and you will run it back at ' +
+      '2am for a decade.',
+  },
+  {
+    id: 'body',
+    test: L => L.metersCritical.length > 0,
+    dynamicTitle: L => 'THE BODY: ' + L.metersCritical.map(k => k.toUpperCase()).join(', '),
+    body: L => {
+      const phrase = {
+        bladder: 'that you needed the toilet',
+        hunger: 'that you hadn’t eaten',
+        thirst: 'that you hadn’t had a drink',
+        fatigue: 'that you were exhausted',
+      };
+      const list = L.metersCritical.map(k => phrase[k] || k);
+      const joined = list.length === 1 ? list[0]
+        : list.slice(0, -1).join(', ') + ' or ' + list[list.length - 1];
+      return 'You did not notice ' + joined + ' until it was loud enough to interrupt you. ' +
+        'The early signal either never arrives or never gets above the noise, and then it lands ' +
+        'all at once as an emergency and takes priority over the one thing you had finally, ' +
+        'after all that, managed to start.';
+    },
+  },
+];
+
+// ── Debrief ───────────────────────────────────────────────────
+function Debrief({ ledger, eventLog, profile, onReplay, onReconfigure }) {
+  const L = ledger;
+  const notes = DEBRIEF_NOTES.filter(n => {
+    try { return n.test(L); } catch (e) { return false; }
+  });
+
+  const line = { borderBottom: '1px solid rgba(57,255,20,0.18)', margin: '20px 0' };
+  const h = { fontSize: 22, letterSpacing: 3, color: C.AMBER, marginBottom: 10 };
+  const body = { fontSize: 19, lineHeight: 1.55, opacity: 0.88, maxWidth: '68ch' };
+
+  const statusLabel = { complete: 'DONE', forgotten: 'FORGOTTEN', pending: 'NOT STARTED', active: 'IN PROGRESS' };
+  const statusColour = { complete: C.PRIMARY, forgotten: C.RED, pending: 'rgba(57,255,20,0.45)', active: C.AMBER };
+
+  return (
+    <div style={{
+      width: '100vw', height: '100vh', overflowY: 'auto',
+      background: C.BG, color: C.PRIMARY, fontFamily: 'VT323, monospace',
+      padding: 'clamp(20px, 5vw, 60px)',
+    }}>
+      <div style={{ maxWidth: 860, margin: '0 auto', paddingBottom: 80 }}>
+
+        <div style={{ fontSize: 'clamp(28px, 6vw, 40px)', letterSpacing: 5 }}>09:00</div>
+        <div style={{ fontSize: 22, opacity: 0.6, marginTop: 4, letterSpacing: 2 }}>
+          YOU HAVE TO LEAVE NOW.
+        </div>
+
+        <div style={line} />
+
+        {/* ── The ledger ── */}
+        <div style={h}>[ THE MORNING ]</div>
+        <div style={{ fontSize: 19 }}>
+          {L.rows.map(r => (
+            <div key={r.id} style={{
+              display: 'flex', gap: 12, alignItems: 'baseline',
+              padding: '3px 0', borderBottom: '1px solid rgba(57,255,20,0.06)',
+            }}>
+              <span style={{ color: statusColour[r.status] || C.PRIMARY_DIM, width: 22, flexShrink: 0 }}>
+                {STATUS_ICONS[r.status] || '·'}
+              </span>
+              <span style={{
+                flex: 1,
+                opacity: r.status === 'complete' ? 1 : 0.75,
+                textDecoration: r.status === 'complete' ? 'none' : 'none',
+              }}>
+                {r.label}
+                {r.abandonedReaches > 0 && r.startedCount === 0 && (
+                  <span style={{ color: C.AMBER_DIM, fontSize: 17 }}>
+                    {'  — reached for ' + r.abandonedReaches + '×, never started'}
+                  </span>
+                )}
+                {r.status !== 'complete' && r.progress > 0.02 && (
+                  <span style={{ opacity: 0.5, fontSize: 17 }}>
+                    {'  — ' + Math.round(r.progress * 100) + '% done'}
+                  </span>
+                )}
+              </span>
+              <span style={{
+                color: statusColour[r.status] || C.PRIMARY_DIM,
+                fontSize: 17, flexShrink: 0, letterSpacing: 1,
+              }}>
+                {statusLabel[r.status] || r.status.toUpperCase()}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 14, fontSize: 19, opacity: 0.7 }}>
+          {L.done.length} of {L.rows.length} finished
+          {L.forgotten.length > 0 && ' · ' + L.forgotten.length + ' forgotten'}
+          {L.totalAbandonedReaches > 0 && ' · ' + L.totalAbandonedReaches + ' abandoned attempts'}
+          {L.totalHoldMs > 1000 && ' · ' + Math.round(L.totalHoldMs / 1000) + 's spent purely trying to begin'}
+        </div>
+
+        <div style={line} />
+
+        {/* ── What happened ── */}
+        {eventLog && eventLog.length > 0 && (
+          <div>
+            <div style={h}>[ WHAT HAPPENED ]</div>
+            <div style={{ fontSize: 18, lineHeight: 1.5 }}>
+              {eventLog.map((e, i) => (
+                <div key={i} style={{
+                  marginBottom: 10, paddingLeft: 12,
+                  borderLeft: '2px solid rgba(255,176,0,0.35)',
+                  whiteSpace: 'pre-wrap', opacity: 0.85,
+                }}>{e.summary}</div>
+              ))}
+            </div>
+            <div style={line} />
+          </div>
+        )}
+
+        {/* ── The explanations ── */}
+        <div style={h}>[ WHAT THAT WAS ]</div>
+        {notes.length === 0 && (
+          <div style={body}>
+            A quiet run. That happens too — not often, and never predictably, and never because
+            you did anything differently from the mornings that fall apart. That is the part that is
+            hardest to explain to anyone: the variance is not earned.
+          </div>
+        )}
+        {notes.map(n => (
+          <div key={n.id} style={{ marginBottom: 28 }}>
+            <div style={{ fontSize: 21, letterSpacing: 2, color: C.AMBER, marginBottom: 6 }}>
+              {n.dynamicTitle ? n.dynamicTitle(L) : n.title}
+            </div>
+            <div style={body}>{n.body(L)}</div>
+          </div>
+        ))}
+
+        <div style={line} />
+
+        {/* ── The closing note ── */}
+        <div style={{ ...body, opacity: 0.95 }}>
+          {L.done.length > 0 ? (
+            <span>
+              {L.done.length === 1
+                ? 'One thing got done this morning. '
+                : L.done.length + ' things got done this morning. '}
+              {L.done.length === 1 ? 'It was' : 'They were'} finished through the whole of
+              the above — not in a gap between it, not once things settled down, but
+              through it. That is the part that gets left out when somebody says it can’t
+              have been that bad, because look, you managed.
+            </span>
+          ) : (
+            <span>
+              Nothing finished. Not one thing. And the whole time, every single second of it,
+              you were trying — which is the detail that never survives the retelling.
+            </span>
+          )}
+        </div>
+
+        <div style={{ marginTop: 36, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <TerminalButton onClick={onReplay}>[ RUN IT AGAIN ]</TerminalButton>
+          <TerminalButton onClick={onReconfigure} dim>[ RUN IT AS SOMEONE ELSE ]</TerminalButton>
+        </div>
+        <div style={{ marginTop: 14, fontSize: 17, opacity: 0.4, maxWidth: '60ch', lineHeight: 1.5 }}>
+          The second option lets you change the parameters. It is worth doing once. Turn the
+          focus up and the initiation cost down and notice how ordinary the morning becomes —
+          that version is not a reward for trying harder, it is a different brain.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TerminalButton({ onClick, children, dim }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        background: hover ? 'rgba(57,255,20,0.12)' : 'transparent',
+        border: '1px solid ' + (dim ? 'rgba(57,255,20,0.35)' : C.PRIMARY),
+        color: dim ? C.PRIMARY_DIM : C.PRIMARY,
+        fontFamily: 'VT323, monospace',
+        fontSize: 21,
+        padding: '10px 22px',
+        cursor: 'pointer',
+        letterSpacing: 2,
+        boxShadow: hover && !REDUCED_MOTION ? '0 0 12px rgba(57,255,20,0.25)' : 'none',
+      }}
+    >{children}</button>
+  );
+}
+
+// ── Intro ─────────────────────────────────────────────────────
+// Cold open. No stat block before you have any idea what the stats mean.
+const INTRO_LINES = [
+  '> ADHD MIND SIMULATOR',
+  '> loading morning…',
+  '',
+  'It is 07:00.',
+  'You have until 09:00.',
+  '',
+  'There is a list. You already know what is on it.',
+  'Knowing what is on it has never been the problem.',
+  '',
+];
+
+function IntroScreen({ onBegin, onConfigure }) {
+  const [shown, setShown] = useState(REDUCED_MOTION ? INTRO_LINES.length : 0);
+  const done = shown >= INTRO_LINES.length;
+
+  useEffect(() => {
+    if (done) return;
+    const t = setTimeout(() => setShown(n => n + 1), INTRO_LINES[shown] === '' ? 180 : 420);
+    return () => clearTimeout(t);
+  }, [shown, done]);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') onBegin(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onBegin]);
+
+  return (
+    <div
+      onClick={() => { if (!done) setShown(INTRO_LINES.length); }}
+      style={{
+        width: '100vw', height: '100vh', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: C.BG, padding: 'clamp(20px, 6vw, 40px)',
+        fontFamily: 'VT323, monospace', color: C.PRIMARY,
+      }}
+    >
+      <div style={{ width: '100%', maxWidth: 620 }}>
+        <div style={{ fontSize: 'clamp(20px, 4.5vw, 26px)', lineHeight: 1.5, minHeight: '11em' }}>
+          {INTRO_LINES.slice(0, shown).map((l, i) => (
+            <div key={i} style={{
+              opacity: l.startsWith('>') ? 0.45 : 0.95,
+              minHeight: '1.5em',
+            }}>{l}</div>
+          ))}
+          {!done && <span className="blink">_</span>}
+        </div>
+
+        {done && (
+          <div style={{ marginTop: 22 }}>
+            <div style={{
+              fontSize: 18, opacity: 0.5, marginBottom: 20, lineHeight: 1.5,
+              borderTop: '1px solid rgba(57,255,20,0.2)', paddingTop: 14,
+            }}>
+              Drag a task into the focus box and hold it there until it commits.
+              It will fight you. That is the point. Keep it inside to make progress.
+            </div>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <TerminalButton onClick={onBegin}>[ BEGIN ]</TerminalButton>
+              <TerminalButton onClick={onConfigure} dim>[ PARAMETERS ]</TerminalButton>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2312,12 +3014,11 @@ function GameLayout({
 
 function App() {
   const [state, setState] = useState({
-    phase: 'config',
+    phase: 'intro',
     profile: { focusLevel: 0.4, impulsivity: 0.7, workingMemory: 0.3, rewardSensitivity: 0.6, medicated: false, initiationCost: 0.8, distractability: 0.6 },
     meters: { bladder: 80, hunger: 70, thirst: 75, fatigue: 60 },
     drive: 60,
     tasks: [],
-    score: { wellbeing: 0, execFunction: 0, tasksDone: 0 },
     gameTime: 0,
     selectedTaskId: null,
     hyperfocus: false,
@@ -2329,6 +3030,9 @@ function App() {
     relationships: {},
     lastDriveEvent: '',
     elapsedMs: 0,
+    perceivedMs: 0,
+    waitingMode: false,
+    ledger: null,
   });
 
   const physicsRef = useRef(null);
@@ -2341,9 +3045,12 @@ function App() {
   const gameTimeRef = useRef(0);
   const lastFrameRef = useRef(null);
   const lastSyncRef = useRef(0);
-  const driveIntegralRef = useRef(0);
   const realElapsedRef = useRef(0);
   const sessionTasksRef = useRef([]);
+  // Perceived time is accumulated, not scaled from the total — otherwise the
+  // perceived clock jumps backwards the moment hyperfocus ends.
+  const perceivedMsRef = useRef(0);
+  const sessionFlagsRef = useRef({ keysEventFired: false, nameEventFired: false, enteredWaitingMode: false });
 
   // Remove boot message on mount
   useEffect(() => {
@@ -2356,7 +3063,10 @@ function App() {
     sessionTasksRef.current = sessionTasks;
 
     // Scatter task nodes — place with overlap avoidance
-    const NODE_W = 220, NODE_H = 60, MIN_GAP = 24;
+    const uiScale = uiScaleFor(canvasW, canvasH);
+    const NODE_W = Math.round(220 * uiScale);
+    const NODE_H = Math.round(60 * uiScale);
+    const MIN_GAP = Math.round(24 * uiScale);
     const placed = [];
     const forgetMarginX = canvasW * 0.05;
     const forgetMarginY = canvasH * 0.05;
@@ -2372,7 +3082,7 @@ function App() {
         const y = minY + Math.random() * (maxY - minY);
         // Reject only if inside the starting focus box area (near the middle)
         const cx = canvasW / 2, cy = canvasH / 2;
-        if (Math.abs(x - cx) < 290 && Math.abs(y - cy) < 200) continue;
+        if (Math.abs(x - cx) < 290 * uiScale && Math.abs(y - cy) < 200 * uiScale) continue;
         // Reject if overlapping another placed node
         const clash = placed.some(p =>
           Math.abs(p.x - x) < NODE_W + MIN_GAP && Math.abs(p.y - y) < NODE_H + MIN_GAP
@@ -2391,7 +3101,7 @@ function App() {
         ...t,
         x, y,
         vx: 0, vy: 0,
-        w: 220, h: 72,
+        w: Math.round(220 * uiScale), h: Math.round(72 * uiScale),
         progress: 0,
         status: 'pending',
         isInBox: false,
@@ -2423,16 +3133,19 @@ function App() {
         isMemo: false,
         x: pos.x, y: pos.y,
         vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
-        w: 220, h: 72,
+        w: Math.round(220 * uiScale), h: Math.round(72 * uiScale),
         ejected: false, isInBox: false, opacity: 1,
         dragOffX: 0, dragOffY: 0,
       };
       initialIntrusive.push(initNode);
-      console.log(`[Telemetry] Pre-spawning startup distraction node. ID: ${initNode.id}, Label: "${initNode.label}", maxDrags/dragsLeft: ${initNode.maxDrags}`);
     }
 
     physicsRef.current = {
-      focusBox: { x: canvasW / 2, y: canvasH / 2, w: PHYSICS.BOX_BASE_W, h: PHYSICS.BOX_BASE_H, vx: 0, vy: 0 },
+      focusBox: {
+        x: canvasW / 2, y: canvasH / 2,
+        ...computeBoxSize(profile, 60, canvasW, canvasH),
+        vx: 0, vy: 0,
+      },
       taskNodes,
       intrusiveNodes: initialIntrusive,
       frameCount: 0,
@@ -2449,13 +3162,43 @@ function App() {
       pendingOverlay: null,
       selectedTaskId: null,
       keysActualLocation: null,
+      waitingMode: false,
+      uiScale,
+      // Which system gives out first varies by morning, like it does.
+      // Ranges straddle the rate that would just reach critical by 09:00, so
+      // which ones actually bite is close to a coin flip each morning.
+      meterRates: {
+        bladder: 0.18 + Math.random() * 0.26,
+        hunger: 0.12 + Math.random() * 0.24,
+        thirst: 0.14 + Math.random() * 0.26,
+        fatigue: 0.10 + Math.random() * 0.24,
+      },
+      // Debrief telemetry
+      totalAbandonedReaches: 0,
+      totalHoldMs: 0,
+      hyperfocusTotalMs: 0,
+      hyperfocusTaskLabel: null,
+      thoughtsLostCount: 0,
+      distractionsLandedCount: 0,
+      metersHitCritical: [],
     };
   }, []);
 
   const handleBegin = useCallback((profile) => {
     profileRef.current = profile;
     driveRef.current = 60;
-    metersRef.current = { bladder: 80, hunger: 70, thirst: 75, fatigue: 60 };
+    const jitter = () => Math.round((Math.random() - 0.5) * 18);
+    metersRef.current = {
+      bladder: clamp(80 + jitter(), 45, 96),
+      hunger: clamp(70 + jitter(), 45, 96),
+      thirst: clamp(75 + jitter(), 45, 96),
+      fatigue: clamp(62 + jitter(), 45, 96),
+    };
+    gameTimeRef.current = 0;
+    perceivedMsRef.current = 0;
+    realElapsedRef.current = 0;
+    lastFrameRef.current = null;
+    sessionFlagsRef.current = { keysEventFired: false, nameEventFired: false, enteredWaitingMode: false };
 
     // Canvas isn't mounted yet (phase was 'config') — store profile and let
     // the ResizeObserver call initPhysics once it has real dimensions.
@@ -2467,10 +3210,38 @@ function App() {
       phase: 'playing',
       profile,
       drive: 60,
-      meters: { bladder: 80, hunger: 70, thirst: 75, fatigue: 60 },
+      meters: { ...metersRef.current },
       tasks: [],
+      eventLog: [],
+      mood: 100,
+      gameTime: 0,
+      perceivedMs: 0,
+      elapsedMs: 0,
+      waitingMode: false,
+      ledger: null,
+      activeOverlay: null,
+      overlayData: null,
+      hyperfocus: false,
+      selectedTaskId: null,
     }));
   }, [initPhysics]);
+
+  // End the session and hand everything to the debrief.
+  const endSession = useCallback(() => {
+    const phys = physicsRef.current;
+    setState(prev => ({
+      ...prev,
+      phase: 'debrief',
+      activeOverlay: null,
+      overlayData: null,
+      ledger: buildLedger(phys, {
+        perceivedDriftMs: perceivedMsRef.current - gameTimeRef.current,
+        keysEventFired: sessionFlagsRef.current.keysEventFired,
+        nameEventFired: sessionFlagsRef.current.nameEventFired,
+        enteredWaitingMode: sessionFlagsRef.current.enteredWaitingMode,
+      }),
+    }));
+  }, []);
 
   // rAF loop
   useEffect(() => {
@@ -2573,6 +3344,7 @@ function App() {
           }
         }
         if (ev.type === 'location_event_trigger') {
+          sessionFlagsRef.current.keysEventFired = true;
           // Spawn forced intrusive thought
           const pos = spawnFromEdge(canvasW, canvasH);
           const maxDrags = 3 + Math.floor(Math.random() * 3); // 3 to 5
@@ -2593,6 +3365,9 @@ function App() {
           // Keys actual location answer (wrong from user's perspective)
           const wrongFirst = LOCATION_OPTIONS[Math.floor(Math.random() * LOCATION_OPTIONS.length)];
           phys.keysFirstGuessAnswer = wrongFirst === 'By the door' ? 'On the counter' : wrongFirst;
+        }
+        if (ev.type === 'task_snap_in') {
+          playSnap(audioRef);
         }
         if (ev.type === 'distraction_rewarding') {
           playDriveSpike(audioRef);
@@ -2665,12 +3440,47 @@ function App() {
       const ctx = canvasEl ? canvasEl.getContext('2d') : null;
       if (ctx) renderCanvas(ctx, phys, profileRef.current, driveRef.current);
 
-      // Update game time and real elapsed
+      // ── Session clock ──────────────────────────────────────────
       gameTimeRef.current += dt * PHYSICS.GAME_TIME_MULT;
       realElapsedRef.current += dt;
 
-      // Drive integral for wellbeing
-      driveIntegralRef.current += driveRef.current * dt;
+      // Perceived time accrues at its own rate. Absorbed → it runs away from
+      // you; flat or stalled → it drags. Accumulating (rather than scaling the
+      // total) is what makes the end-of-session drift meaningful.
+      const perceivedRate = phys.hyperfocus ? 3.5
+        : driveRef.current > 70 ? 0.55
+        : driveRef.current < 20 ? 1.9
+        : 1;
+      perceivedMsRef.current += dt * PHYSICS.GAME_TIME_MULT * perceivedRate;
+
+      const clockMs = SESSION.START_MS + gameTimeRef.current;
+
+      // Waiting mode: from 08:00 there is a thing at 08:30, and everything
+      // unrelated to it becomes much harder to start.
+      const shouldWait = clockMs >= SESSION.WAITING_ONSET_MS && clockMs < SESSION.APPOINTMENT_MS;
+      if (shouldWait && !phys.waitingMode) {
+        phys.waitingMode = true;
+        sessionFlagsRef.current.enteredWaitingMode = true;
+        playError(audioRef);
+        setState(prev => ({
+          ...prev,
+          waitingMode: true,
+          eventLog: [...prev.eventLog, {
+            type: 'waiting_mode',
+            summary: '[ 08:00 ]\nSomething at 08:30.\nThe next half hour is no longer usable for anything else.',
+            timestamp: Date.now(),
+          }],
+        }));
+      } else if (!shouldWait && phys.waitingMode) {
+        phys.waitingMode = false;
+        setState(prev => ({ ...prev, waitingMode: false }));
+      }
+
+      // Out of time.
+      if (clockMs >= SESSION.END_MS) {
+        endSession();
+        return;
+      }
 
       // 200ms React sync
       if (timestamp - lastSyncRef.current > 200) {
@@ -2682,15 +3492,9 @@ function App() {
               .map(n => ({
                   id: n.id, label: n.label, status: n.status,
                   progress: n.progress, urgency: n.urgency,
+                  abandonedReaches: n.abandonedReaches || 0,
               }))
           : [];
-
-        // Count done tasks for exec function score
-        const doneTasks = currentPhys ? currentPhys.taskNodes.filter(n => n.status === 'complete') : [];
-        const execScore = doneTasks.reduce((acc, t) => {
-          const taskData = morningTasks.find(m => m.id === t.id);
-          return acc + (taskData ? taskData.reward : 10);
-        }, 0);
 
         setState(prev => {
           // Keep overlayData.taskInBox live for conversation overlay
@@ -2706,16 +3510,12 @@ function App() {
             drive: driveRef.current,
             meters: { ...metersRef.current },
             gameTime: gameTimeRef.current,
+            perceivedMs: perceivedMsRef.current,
             elapsedMs: realElapsedRef.current,
             tasks: taskMirror,
             profile: profileRef.current,
             overlayData,
             hyperfocus: currentPhys ? currentPhys.hyperfocus : false,
-            score: {
-              wellbeing: Math.round(driveIntegralRef.current / 100000),
-              execFunction: execScore,
-              tasksDone: doneTasks.length,
-            },
           };
         });
       }
@@ -2728,7 +3528,7 @@ function App() {
       if (rAFRef.current) cancelAnimationFrame(rAFRef.current);
       lastFrameRef.current = null;
     };
-  }, [state.phase]);
+  }, [state.phase, endSession]);
 
   const handleOverlayEvent = useCallback((ev) => {
     const phys = physicsRef.current;
@@ -2748,6 +3548,7 @@ function App() {
         }],
       }));
     } else if (ev.type === 'name_selected') {
+      sessionFlagsRef.current.nameEventFired = true;
       // Email volunteer outcome
       const execPenalty = 8;
       const moodPenalty = 4;
@@ -2807,8 +3608,29 @@ function App() {
     setState(prev => ({ ...prev, selectedTaskId: id }));
   }, []);
 
+  if (state.phase === 'intro') {
+    return (
+      <IntroScreen
+        onBegin={() => handleBegin(state.profile)}
+        onConfigure={() => setState(prev => ({ ...prev, phase: 'config' }))}
+      />
+    );
+  }
+
   if (state.phase === 'config') {
-    return <ConfigScreen onBegin={handleBegin} />;
+    return <ConfigScreen initial={state.profile} onBegin={handleBegin} />;
+  }
+
+  if (state.phase === 'debrief') {
+    return (
+      <Debrief
+        ledger={state.ledger}
+        eventLog={state.eventLog}
+        profile={state.profile}
+        onReplay={() => handleBegin(state.profile)}
+        onReconfigure={() => setState(prev => ({ ...prev, phase: 'config' }))}
+      />
+    );
   }
 
   return (
@@ -2817,10 +3639,12 @@ function App() {
       drive={state.drive}
       tasks={state.tasks}
       gameTime={state.gameTime}
-      score={state.score}
       elapsedMs={state.elapsedMs}
       selectedTaskId={state.selectedTaskId}
       onSelectTask={handleSelectTask}
+      perceivedMs={state.perceivedMs}
+      waitingMode={state.waitingMode}
+      onEndEarly={endSession}
       lastDriveEvent={state.lastDriveEvent}
       eventLog={state.eventLog}
       mood={state.mood}

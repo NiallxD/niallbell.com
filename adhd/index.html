@@ -2,16 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
   <title>ADHD Mind Simulator — Niall Bell</title>
   <meta name="description" content="A physics-driven simulation of an ADHD morning. Experience the mechanics of attention, initiation cost, and working memory.">
   <meta name="robots" content="noarchive">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <!-- Pinned to 7.x on purpose. @babel/standalone 8 defaults preset-react to the
+       automatic JSX runtime, which emits `import ... from "react/jsx-runtime"` —
+       that cannot resolve in a plain text/babel script tag with no bundler,
+       and the page dies on the loading screen. Do not un-pin this. -->
+  <script src="https://unpkg.com/@babel/standalone@7.29.8/babel.min.js"></script>
   <style>
     :root {
       --c-bg: #0a0a0a;
@@ -141,11 +145,30 @@
     ::-webkit-scrollbar-track { background: var(--c-bg); }
     ::-webkit-scrollbar-thumb { background: var(--c-border); }
     ::-webkit-scrollbar-thumb:hover { background: var(--c-primary-dim); }
+
+    /* The CRT treatment is decoration. Strip it if the OS asks. */
+    @media (prefers-reduced-motion: reduce) {
+      body { animation: none; }
+      body::before { display: none; }
+      .blink, .flash-amber, .flash-red { animation: none; }
+      * { transition: none !important; }
+    }
+
+    /* Touch: no rubber-banding or long-press callouts over the canvas */
+    html, body {
+      overscroll-behavior: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    @supports (height: 100dvh) {
+      html, body { height: 100dvh; }
+      #app { height: 100dvh; }
+    }
   </style>
 </head>
 <body>
   <div id="boot-msg">LOADING SYSTEM<span class="blink">_</span></div>
   <div id="app"></div>
-  <script type="text/babel" data-presets="react" src="/static/js/adhd-game.js?v=1.0.5"></script>
+  <script type="text/babel" data-presets="react" src="/static/js/adhd-game.js?v=2.0.0"></script>
 </body>
 </html>
