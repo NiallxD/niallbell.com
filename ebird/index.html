@@ -169,16 +169,20 @@
   .theme-transitioning .eb-card-count { transition: none !important; }
   .eb-card-sub { font-size: .8rem; color: var(--color-muted); }
   .eb-card-right { text-align: right; font-size: .8rem; color: var(--color-secondary); white-space: nowrap; }
+  .eb-unit-short { display: none; } /* swaps in for "species" on phones — see the 600px query */
   .eb-card-count { font-weight: 700; font-size: 1.05rem; color: var(--color-text); display: block; }
-  .eb-card-actions { display: flex; align-items: center; gap: .9rem; }
+  /* A pill in the open panel, beside the hotspot name — big enough to tap, and out of the
+     summary row, so it neither competes with the species count nor fights the toggle. */
   .eb-open {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
-    color: var(--color-muted); border: 1px solid transparent;
+    display: inline-flex; align-items: center; gap: .4rem; flex: none;
+    padding: .4rem .85rem; border-radius: 999px;
+    border: 1px solid var(--color-border); background: var(--color-surface);
+    color: var(--color-secondary); font-size: .78rem; font-weight: 700;
+    letter-spacing: .03em; text-decoration: none; white-space: nowrap;
     transition: color .15s ease, border-color .15s ease, background .15s ease;
   }
   .eb-open:hover, .eb-open:focus-visible {
-    color: var(--color-accent); border-color: var(--color-border); background: var(--color-bg);
+    color: var(--color-accent); border-color: var(--color-accent); background: var(--color-bg);
   }
 
   /* ── Detail ── */
@@ -202,6 +206,19 @@
   .theme-transitioning .eb-notes-body,
   .theme-transitioning .eb-species td { transition: none !important; }
   .eb-notes-body + .eb-notes-body { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--color-border); }
+
+  /* The hotspot name, sitting directly above the species list where it has room to run to
+     its full length — eBird location names are often longer than a row can hold. */
+  .eb-detail-loc {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .6rem 1rem;
+    margin: 0 0 .35rem; padding-top: .25rem;
+  }
+  .eb-detail-place {
+    display: flex; align-items: flex-start; gap: .45rem; margin: 0;
+    font-size: .9rem; font-weight: 600; color: var(--color-text); text-align: left;
+  }
+  .eb-detail-place svg { flex: none; color: var(--color-accent); margin-top: .2rem; }
 
   /* Species expander inside an open checklist */
   .eb-species-toggle { border-top: 1px solid var(--color-border); }
@@ -417,8 +434,23 @@
 
   @media (max-width: 600px) {
     .eb-wrap { padding-left: 1rem; padding-right: 3.25rem; }
-    .eb-card > summary { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
-    .eb-card-actions { flex-direction: column; gap: .25rem; }
+    .eb-card > summary { grid-template-columns: auto minmax(0, 1fr) auto; padding: .7rem .8rem; }
+
+    /* Stacking the count and the link made the row tall, and the owl stretches to the row —
+       so the owl grew with it. Keep the right-hand block on one line and cap the owl. */
+    .eb-card-right { font-size: .78rem; }
+    .eb-card-count { display: inline; font-size: .95rem; }
+    .eb-unit-long { display: none; }
+    .eb-unit-short { display: inline; }
+
+    /* Chart header stacks: toggle centred on its own line, the readout beneath it. */
+    .eb-spark-controls {
+      flex-direction: column-reverse; align-items: center;
+      width: 100%; margin-left: 0; gap: .5rem;
+    }
+    .eb-spark-readout { text-align: center; }
+    .eb-spark { padding: 1.25rem 1rem 1rem; }
+    .eb-owl { align-self: center; height: 40px; }
   }
 </style>
 

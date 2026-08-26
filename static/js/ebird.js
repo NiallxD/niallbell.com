@@ -139,6 +139,11 @@
     '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>' +
     '<polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>';
 
+  var PIN_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>';
+
   function protocolLabel(p) { return (p || '').replace(/^eBird\s*-\s*/, ''); }
 
   /* ── Build checklists from rows ── */
@@ -389,23 +394,25 @@
   }
 
   function renderWeek(w, i) {
-    var end = new Date(w.start); end.setDate(end.getDate() + 6);
     var species = Object.create(null);
     w.items.forEach(function (c) { c.species.forEach(function (s) { if (s.name) species[s.name] = true; }); });
     var n = Object.keys(species).length;
 
     return '<section class="eb-week" data-week="' + i + '">' +
       '<div class="eb-week-head">' +
-        '<h2 class="eb-week-title">Week of ' + esc(fmtShort(w.start)) + ' – ' + esc(fmtShort(end)) + ' ' + end.getFullYear() + '</h2>' +
-        '<span class="eb-week-meta">' + w.items.length + ' checklist' + (w.items.length === 1 ? '' : 's') +
-          ' · ' + n + ' species</span>' +
+        '<h2 class="eb-week-title">Week of ' + esc(fmtShort(w.start)) + ' ' + w.start.getFullYear() + '</h2>' +
+        '<span class="eb-week-meta">' + w.items.length +
+          '<span class="eb-unit-long"> checklist' + (w.items.length === 1 ? '' : 's') + '</span>' +
+          '<span class="eb-unit-short"> ch.</span> · ' + n +
+          '<span class="eb-unit-long"> species</span><span class="eb-unit-short"> sp.</span>' +
+        '</span>' +
       '</div>' +
       w.items.map(renderCard).join('') +
     '</section>';
   }
 
   function renderCard(c) {
-    var sub = [c.location, c.time, c.county || c.region].filter(Boolean).join(' · ');
+    var sub = [c.time, c.county || c.region].filter(Boolean).join(' · ');
     return '<details class="eb-card" data-id="' + esc(c.id) + '">' +
       '<summary>' +
         '<span class="eb-owl" aria-hidden="true">' +
@@ -416,13 +423,9 @@
           '<div class="eb-card-date">' + esc(fmtDate(c.date)) + '</div>' +
           '<div class="eb-card-sub">' + esc(sub) + '</div>' +
         '</div>' +
-        '<div class="eb-card-actions">' +
-          '<div class="eb-card-right">' +
-            '<span class="eb-card-count">' + c.species.length + '</span> species' +
-          '</div>' +
-          '<a class="eb-open" href="https://ebird.org/checklist/' + encodeURIComponent(c.id) + '"' +
-            ' target="_blank" rel="noopener noreferrer" title="Open this checklist on eBird"' +
-            ' aria-label="Open this checklist on eBird">' + EXTERNAL_ICON + '</a>' +
+        '<div class="eb-card-right">' +
+          '<span class="eb-card-count">' + c.species.length + '</span> ' +
+          '<span class="eb-unit-long">species</span><span class="eb-unit-short">sp.</span>' +
         '</div>' +
       '</summary>' +
       '<div class="eb-detail">' + renderDetail(c) + '</div>' +
@@ -451,6 +454,12 @@
     html += '<div class="eb-meta">' + chips.filter(Boolean).map(function (t) {
       return '<span class="eb-chip">' + esc(t) + '</span>';
     }).join('') + '</div>';
+
+    html += '<div class="eb-detail-loc">' +
+      '<p class="eb-detail-place">' + PIN_ICON + '<span>' + esc(c.location) + '</span></p>' +
+      '<a class="eb-open" href="https://ebird.org/checklist/' + encodeURIComponent(c.id) + '"' +
+        ' target="_blank" rel="noopener noreferrer">View on eBird' + EXTERNAL_ICON + '</a>' +
+    '</div>';
 
     var noted = c.species.filter(function (s) { return s.details || s.breeding || s.media; }).length;
     html += '<details class="eb-species-toggle">' +
@@ -538,8 +547,12 @@
       var prev = barWeeks[i - 1];
       var newMonth = !prev || b.start.getMonth() !== prev.start.getMonth();
       var first = newMonth && b.start.getDate() <= 7;
-      return '<span class="eb-bar-axis-cell">' + (first ?
-        b.start.toLocaleDateString(undefined, { month: 'short' }) : '') + '</span>';
+      if (!first) return '<span class="eb-bar-axis-cell"></span>';
+      // Phones get the narrow form (S, O, N…) — "Sep Oct Nov" does not fit 52 bars wide.
+      return '<span class="eb-bar-axis-cell">' +
+        '<span class="eb-unit-long">' + b.start.toLocaleDateString(undefined, { month: 'short' }) + '</span>' +
+        '<span class="eb-unit-short">' + b.start.toLocaleDateString(undefined, { month: 'narrow' }) + '</span>' +
+      '</span>';
     }).join('');
 
     el.sparkTitle.textContent = barMetric === 'species' ? 'Species per week' : 'Checklists per week';
@@ -716,8 +729,7 @@
 
   function showBubble(tickIndex, clientY) {
     var w = weeks[railTicks[tickIndex].index];
-    var end = new Date(w.start); end.setDate(end.getDate() + 6);
-    el.bubble.textContent = fmtShort(w.start) + ' – ' + fmtShort(end) + ' ' + end.getFullYear();
+    el.bubble.textContent = fmtShort(w.start) + ' ' + w.start.getFullYear();
     el.bubble.hidden = false;
     var box = el.rail.getBoundingClientRect();
     var y = Math.max(box.top, Math.min(clientY, box.top + box.height));
@@ -825,8 +837,10 @@
     /* A link inside <summary> is a genuine conflict: the browser follows it AND toggles the
        row, and neither stopPropagation (same-element listeners still run) nor preventDefault
        (cancels the navigation too) settles it alone. Cancel the click and open the tab
-       ourselves — a direct user gesture, so no popup blocker. */
+       ourselves — a direct user gesture, so no popup blocker. Links in the panel below are
+       left to the browser, so modifier-clicks and the context menu keep working. */
     var link = e.target.closest ? e.target.closest('a[href]') : null;
+    if (link && !link.closest('summary')) return;
     if (link) {
       e.preventDefault();
       window.open(link.href, '_blank', 'noopener,noreferrer');
