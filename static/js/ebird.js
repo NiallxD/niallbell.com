@@ -292,8 +292,35 @@
       }).join('');
   }
 
+  /* A numeric search means a species count, and only that: "60" is the checklists with 60
+     species, "60+" is 60 or more, and ">60" / "<20" are ranges. Letting a bare number also
+     match text looked broken — "60" pulled in checklists of 1 and 5 species because the
+     figure appeared in a note. Years belong in the year filter, which is right beside it. */
+  function parseCountQuery(q) {
+    var plus = /^(\d+)\s*\+$/.exec(q);
+    if (plus) return { test: function (n) { return n >= +plus[1]; }, allowText: false };
+
+    var cmp = /^(>=|<=|>|<)\s*(\d+)$/.exec(q);
+    if (cmp) {
+      var v = +cmp[2], op = cmp[1];
+      return {
+        test: function (n) {
+          return op === '>' ? n > v : op === '<' ? n < v : op === '>=' ? n >= v : n <= v;
+        },
+        allowText: false
+      };
+    }
+
+    if (/^\d+$/.test(q)) {
+      var exact = +q;
+      return { test: function (n) { return n === exact; }, allowText: false };
+    }
+    return null;
+  }
+
   function apply() {
     var q = el.search.value.trim().toLowerCase();
+    var count = q ? parseCountQuery(q) : null;
     var year = el.year.value, region = el.region.value;
     var from = el.from.value, to = el.to.value;
 
@@ -302,7 +329,11 @@
       if (region && c.region !== region) return false;
       if (from && c.dateStr < from) return false;
       if (to && c.dateStr > to) return false;
-      if (q && c.searchText.indexOf(q) === -1) return false;
+      if (q) {
+        if (count) {
+          if (!count.test(c.species.length) && !(count.allowText && c.searchText.indexOf(q) !== -1)) return false;
+        } else if (c.searchText.indexOf(q) === -1) return false;
+      }
       return true;
     });
 
