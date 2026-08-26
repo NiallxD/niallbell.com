@@ -1,0 +1,435 @@
+---
+layout: base.njk
+---
+
+<style>
+  /* The date rail is this page's scroll, and the native bar sits right on top of
+     it. Hidden here only — the rule lives in this page's scoped style block. */
+  html, body { scrollbar-width: none; -ms-overflow-style: none; }
+  html::-webkit-scrollbar, body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+  /* Width, header and card treatment all follow /site-activity/ (templates/analytics.njk),
+     so the two transparency-ish pages read as the same furniture. */
+  .eb-wrap { padding-bottom: 2rem; }
+  .eb-header { margin-bottom: 2.5rem; }
+
+  /* Callout, matching .analytics-note on /site-activity/. Text comes from the page's
+     `callout:` front matter, so it is edited in the .md, not in here. */
+  .eb-note {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 2rem 2.5rem;
+    margin-bottom: 2.5rem;
+    display: flex; gap: 1.5rem; align-items: flex-start;
+  }
+  .eb-note svg { flex-shrink: 0; color: var(--color-accent); margin-top: 2px; }
+  .eb-note p {
+    margin: 0; font-size: 0.95rem; line-height: 1.7; color: var(--color-secondary);
+    text-align: left;
+  }
+  .eb-note a { color: var(--color-link); text-decoration: underline; text-underline-offset: 3px; }
+  .eb-header .eb-lede-wrap p { font-size: 1.1rem; color: var(--color-secondary); font-weight: 600; margin: 0; text-align: left; }
+
+
+
+  /* ── Drop zone ── */
+  .eb-drop {
+    display: block; /* it is a <label>, i.e. inline by default — padding and border collapse */
+    margin-bottom: 1.5rem;
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface);
+    padding: 3rem 1.5rem;
+    text-align: center;
+    transition: border-color .2s ease, background .2s ease;
+    cursor: pointer;
+  }
+  .eb-drop:hover, .eb-drop.is-over { border-color: var(--color-accent); }
+  .eb-drop svg { color: var(--color-muted); margin-bottom: .75rem; }
+  /* text-align: center on the label is inherited, but style.css:97 sets `p { text-align:
+     justify }`, which beats an inherited value — so the paragraphs need it declared. */
+  .eb-drop-title { font-weight: 600; margin: 0 0 .35rem; text-align: center; }
+  .eb-drop-hint { color: var(--color-muted); font-size: .875rem; margin: 0; text-align: center; }
+  .eb-drop input[type=file] { display: none; }
+  .eb-error { color: #d33; font-size: .875rem; margin: -.75rem 0 1.25rem; }
+
+  /* ── Summary ── */
+  .eb-filters { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 2rem; }
+  .eb-filters input, .eb-filters select {
+    font-family: inherit; font-size: .85rem; padding: .45rem .75rem;
+    background: var(--color-surface); color: var(--color-text);
+    border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+    cursor: pointer; transition: border-color .2s ease;
+  }
+  .eb-filters input:hover, .eb-filters select:hover { border-color: var(--color-accent); }
+  .eb-filters input[type=search] { flex: 1 1 220px; min-width: 160px; }
+  /* An empty date input still paints today's date as a placeholder, which reads as an
+     active filter. Dim it until it actually holds a value. */
+  .eb-filters input[type=date].is-empty { color: var(--color-muted); opacity: .65; }
+  .eb-filters label { font-size: .8rem; color: var(--color-muted); }
+  .eb-btn {
+    font: inherit; font-size: .8rem; padding: .45rem .8rem; cursor: pointer;
+    background: var(--color-bg); color: var(--color-secondary);
+    border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  }
+  .eb-btn:hover { border-color: var(--color-accent); color: var(--color-text); }
+
+  /* ── Week groups ── */
+  .eb-week { margin-bottom: 2.25rem; }
+  .eb-week-head {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 1rem;
+    border-bottom: 1px solid var(--color-border); padding-bottom: .4rem; margin-bottom: .75rem;
+  }
+  .eb-week-title { font-size: .8rem; letter-spacing: .1em; text-transform: uppercase; color: var(--color-secondary); font-weight: 600; }
+  .eb-week-meta { font-size: .75rem; color: var(--color-muted); white-space: nowrap; }
+
+  /* ── Checklist card ── */
+  .eb-card {
+    border: 1px solid var(--color-border); border-radius: var(--radius-md);
+    margin-bottom: .6rem; background: var(--color-bg); overflow: hidden;
+    transition: border-color .18s ease;
+  }
+  .eb-card:hover, .eb-card[open] { border-color: var(--color-accent); }
+  .eb-card > summary {
+    list-style: none; cursor: pointer; padding: .85rem 1rem;
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .25rem 0.65rem;
+    align-items: center;
+  }
+  .eb-card > summary::-webkit-details-marker { display: none; }
+  .eb-card > summary:hover { background: var(--color-surface); }
+  /* The explicit colour matters: without one this inherits from <body>, and it is the body's
+     colour that animates during a theme toggle — a child cannot opt out of inheriting an
+     already-animating value, so `transition: none` below only bites once the element owns
+     its colour. */
+  .eb-card-date { font-weight: 600; color: var(--color-text); }
+  /* style.css:40 fades every colour over 1s while the theme toggles. Against a card
+     background doing the same, the row text reads as lagging behind the switch — so opt it
+     out and let it flip with the theme. */
+  .theme-transitioning .eb-card-date,
+  .theme-transitioning .eb-card-sub,
+  .theme-transitioning .eb-week-title,
+  .theme-transitioning .eb-card-count { transition: none !important; }
+  .eb-card-sub { font-size: .8rem; color: var(--color-muted); }
+  .eb-card-right { text-align: right; font-size: .8rem; color: var(--color-secondary); white-space: nowrap; }
+  .eb-card-count { font-weight: 700; font-size: 1.05rem; color: var(--color-text); display: block; }
+  .eb-card-actions { display: flex; align-items: center; gap: .9rem; }
+  .eb-open {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
+    color: var(--color-muted); border: 1px solid transparent;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+  .eb-open:hover, .eb-open:focus-visible {
+    color: var(--color-accent); border-color: var(--color-border); background: var(--color-bg);
+  }
+
+  /* ── Detail ── */
+  .eb-detail { padding: 0 1rem 1rem; border-top: 1px solid var(--color-border); }
+  .eb-meta { display: flex; flex-wrap: wrap; gap: .4rem; margin: .9rem 0; }
+  .eb-chip {
+    font-size: .72rem; padding: .2rem .5rem; border-radius: 999px;
+    background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-secondary);
+  }
+  /* Field notes — the lead element of an open checklist. No panel of its own: a card
+     inside a card just draws a second box around the same content. */
+  .eb-notes { margin: 1.1rem 0 1.25rem; }
+  .eb-notes-label {
+    display: block; font-size: .66rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--color-accent); font-weight: 700; margin-bottom: .55rem;
+  }
+  .eb-notes-body {
+    margin: 0; font-family: var(--font-serif); font-size: 1.05rem; line-height: 1.65;
+    color: var(--color-text); white-space: pre-wrap;
+  }
+  .theme-transitioning .eb-notes-body,
+  .theme-transitioning .eb-species td { transition: none !important; }
+  .eb-notes-body + .eb-notes-body { margin-top: .8rem; padding-top: .8rem; border-top: 1px solid var(--color-border); }
+
+  /* Species expander inside an open checklist */
+  .eb-species-toggle { border-top: 1px solid var(--color-border); }
+  .eb-species-toggle > summary {
+    list-style: none; cursor: pointer; padding: .55rem .1rem;
+    display: flex; align-items: center; gap: .55rem;
+    font-size: .8rem; letter-spacing: .06em; text-transform: uppercase;
+    font-weight: 600; color: var(--color-secondary);
+  }
+  .eb-species-toggle > summary::-webkit-details-marker { display: none; }
+  .eb-species-toggle > summary:hover { color: var(--color-accent); }
+  .eb-species-chevron { display: inline-block; transition: transform .15s ease; font-size: .9rem; }
+  .eb-species-toggle[open] > summary .eb-species-chevron { transform: rotate(90deg); }
+
+  /* The checklist row's marker is an owl rather than a chevron: looking forward when the row
+     is closed, looking down into it when open — the same read as a chevron rotating 90°.
+     Both faces are masks over currentColor, so they inherit the row's colour and both themes
+     for free, and the pair cross-fades instead of cutting. */
+  .eb-owl {
+    position: relative; display: block;
+    /* Stretch to the row's text block — top of the date to the bottom of the location line —
+       instead of a fixed size. The art's own ratio then sets the width, so `mask-size:
+       contain` fills that height exactly rather than fitting to the narrower axis. */
+    align-self: stretch;
+    height: auto; width: auto;
+    aspect-ratio: 460 / 800; /* the files are cropped to the ink, so this fills the height */
+    color: var(--color-muted); transition: color .18s ease;
+  }
+  .eb-owl-face {
+    position: absolute; inset: 0;
+    background: currentColor;
+    -webkit-mask-position: center; mask-position: center;
+    /* 86% of the row height, not the full 46px — flush with the text block reads as slightly
+       too tall next to it. Height-driven sizing keeps the art's own ratio. */
+    -webkit-mask-size: auto 86%; mask-size: auto 86%;
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    transition: opacity .22s ease;
+  }
+  .eb-owl-forward {
+    -webkit-mask-image: url('/static/images/owl-look-forward.svg');
+    mask-image: url('/static/images/owl-look-forward.svg');
+    opacity: 1;
+  }
+  .eb-owl-down {
+    -webkit-mask-image: url('/static/images/owl-look-down.svg');
+    mask-image: url('/static/images/owl-look-down.svg');
+    opacity: 0;
+  }
+  .eb-card[open] > summary .eb-owl-forward { opacity: 0; }
+  .eb-card[open] > summary .eb-owl-down { opacity: 1; }
+  .eb-card > summary:hover .eb-owl,
+  .eb-card[open] > summary .eb-owl { color: var(--color-accent); }
+  .eb-species-noted { text-transform: none; letter-spacing: 0; color: var(--color-muted); font-weight: 400; }
+  .eb-species { width: 100%; border-collapse: collapse; font-size: .9rem; margin-bottom: .5rem; }
+  .eb-species th {
+    text-align: left; font-size: .68rem; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--color-muted); font-weight: 600; padding: .35rem .5rem; border-bottom: 1px solid var(--color-border);
+  }
+  .eb-species td { padding: .4rem .5rem; border-bottom: 1px solid var(--color-border); vertical-align: top; }
+  .eb-species tr:last-child td { border-bottom: none; }
+  .eb-species .eb-num { text-align: right; white-space: nowrap; width: 4rem; font-variant-numeric: tabular-nums; }
+  .eb-sci { font-style: italic; color: var(--color-muted); font-size: .8rem; display: block; }
+  .eb-obs-note { color: var(--color-secondary); font-size: .82rem; margin-top: .25rem; }
+
+
+  /* ── Date scrubber ──
+     Pinned to the right edge of the viewport, full height, so a decade of checklists is
+     always one drag away no matter how far down the list you are. */
+  .eb-rail {
+    position: fixed;
+    right: 0;
+    top: var(--nav-height);
+    bottom: 0;
+    width: 68px;
+    z-index: 5;
+    display: flex; flex-direction: column;
+    padding: .75rem .5rem .75rem 0;
+    /* No background: a gradient cannot be transitioned, so it snapped between themes while
+       everything around it faded over 1s. `.eb-wrap` already keeps content clear of the rail
+       above 720px, so there is nothing to mask behind the ticks. */
+    touch-action: none; /* the rail owns vertical drags */
+    user-select: none;
+  }
+  .eb-rail[hidden] { display: none; }
+  /* The rail is fixed, so it would otherwise ride over the footer at the bottom of the
+     page. The footer is in normal flow, so it needs a stacking context of its own to
+     paint above it. (Header is z-index 100 and already wins.) */
+  .site-footer { position: relative; z-index: 10; }
+  .eb-rail.is-scrubbing { cursor: grabbing; }
+
+  .eb-tick {
+    appearance: none; background: none; border: 0; padding: 0; margin: 0; cursor: pointer;
+    font: inherit; color: var(--color-muted);
+    display: flex; align-items: center; justify-content: flex-end; gap: .4rem;
+    flex: 1 1 auto; min-height: 0; width: 100%;
+  }
+  .eb-tick-line { display: block; width: 12px; height: 1px; background: var(--color-border); flex: none; }
+  .eb-tick-label {
+    font-size: .62rem; letter-spacing: .04em; white-space: nowrap;
+    opacity: 0; transition: opacity .15s ease, color .15s ease;
+    order: -1; text-align: right;
+  }
+  /* Only year boundaries, the hovered tick and the live tick carry a label: a decade of
+     history packs ~70 ticks into the rail, and every label on at once is a smear. The
+     bubble that follows the pointer covers the rest. */
+  .eb-tick.is-year .eb-tick-label { opacity: .75; font-weight: 700; }
+  .eb-tick.is-year .eb-tick-line { width: 16px; background: var(--color-secondary); }
+  .eb-tick:hover .eb-tick-line, .eb-tick:focus-visible .eb-tick-line { background: var(--color-accent); width: 18px; }
+  .eb-tick:hover .eb-tick-label { opacity: 1; color: var(--color-text); }
+
+  .eb-tick.is-active .eb-tick-line { background: var(--color-accent); width: 20px; height: 2px; }
+  .eb-tick.is-active .eb-tick-label { opacity: 1; color: var(--color-accent); font-weight: 700; }
+
+  .eb-bubble {
+    position: fixed; z-index: 6; transform: translateY(-50%);
+    background: var(--color-text); color: var(--color-bg);
+    font-size: .72rem; font-weight: 600; white-space: nowrap;
+    padding: .3rem .55rem; border-radius: var(--radius-sm);
+    pointer-events: none; box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  }
+
+  .eb-empty { text-align: center; color: var(--color-muted); padding: 3rem 1rem; }
+
+  /* ── Sparkline ── */
+  .eb-spark {
+    margin: 0 0 2rem;
+    background: var(--color-bg); border: 1px solid var(--color-border);
+    border-radius: var(--radius-md); padding: 1.5rem 2rem 1.25rem;
+  }
+  .eb-spark[hidden] { display: none; }
+  .eb-spark-head {
+    display: flex; flex-wrap: wrap; gap: .6rem 1rem; justify-content: space-between;
+    align-items: center; margin-bottom: .75rem;
+  }
+  .eb-spark-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem; }
+  .eb-spark-controls { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
+
+  .eb-bar-toggle {
+    display: inline-flex; flex: none; padding: 2px;
+    background: var(--color-surface); border: 1px solid var(--color-border);
+    border-radius: 999px;
+  }
+  .eb-bar-toggle button {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    font-family: inherit; font-size: .72rem; font-weight: 700; letter-spacing: .04em;
+    padding: .3rem .75rem; border-radius: 999px; color: var(--color-muted);
+    transition: background .15s ease, color .15s ease;
+  }
+  .eb-bar-toggle button:hover { color: var(--color-text); }
+  .eb-bar-toggle button.is-on { background: var(--color-bg); color: var(--color-accent); }
+  .eb-spark-title {
+    font-size: 0.7rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--color-muted);
+  }
+  .eb-spark-range { color: var(--color-muted); font-weight: 600; letter-spacing: .04em; text-transform: none; }
+  .eb-spark-readout {
+    font-size: .75rem; color: var(--color-muted);
+    font-variant-numeric: tabular-nums; text-align: right;
+  }
+  .eb-bars {
+    display: flex; align-items: flex-end; gap: 2px; height: 76px; /* 2px surface gap between bars */
+  }
+  .eb-bar {
+    appearance: none; background: none; border: 0; padding: 0; margin: 0;
+    flex: 1 1 0; height: 100%; cursor: pointer; display: flex; align-items: flex-end;
+  }
+  .eb-bar-track {
+    display: flex; align-items: flex-end; width: 100%; height: 100%;
+    background: var(--color-surface); border-radius: 3px;
+  }
+  .eb-bar-fill {
+    display: block; width: 100%; min-height: 3px;
+    background: var(--color-accent); border-radius: 3px; /* rounded data end, anchored to the baseline */
+    transition: opacity .15s ease;
+  }
+  .eb-bar:hover .eb-bar-fill, .eb-bar:focus-visible .eb-bar-fill { opacity: .65; }
+  .eb-bar:hover .eb-bar-track, .eb-bar:focus-visible .eb-bar-track { background: var(--color-border); }
+
+  .eb-bar-axis { display: flex; gap: 2px; margin-top: .4rem; }
+  .eb-bar-axis-cell {
+    flex: 1 1 0; font-size: .6rem; letter-spacing: .04em; color: var(--color-muted);
+    white-space: nowrap; overflow: visible;
+  }
+
+  [hidden] { display: none; }
+
+  .eb-sentinel { height: 1px; }
+  .eb-end {
+    text-align: center; color: var(--color-muted); padding: 2rem 1rem 0;
+    font-size: .75rem; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .eb-loading { text-align: center; color: var(--color-muted); padding: 3rem 1rem; }
+
+  .eb-wrap { padding-right: 5.5rem; } /* clear of the fixed date rail */
+
+  /* The rail stays on touch screens — the native scrollbar is hidden, so it is the only
+     scroll affordance there, and a decade of checklists needs one. It just gets narrower and
+     drops the standing labels: the bubble names the week under your thumb. */
+  @media (max-width: 720px) {
+    .eb-rail { width: 44px; padding: .6rem .35rem .6rem 0; }
+    .eb-wrap { padding-right: 3.25rem; }
+    .eb-tick { position: relative; }
+    .eb-tick-label { display: none; }
+    .eb-tick.is-active .eb-tick-label {
+      display: block; position: absolute; right: 26px;
+      background: var(--color-bg); padding: 0 .3rem; border-radius: var(--radius-sm);
+    }
+    .eb-tick-line { width: 14px; }
+    .eb-tick.is-year .eb-tick-line { width: 20px; }
+    .eb-tick.is-active .eb-tick-line { width: 24px; }
+    .eb-bubble { font-size: .8rem; padding: .4rem .7rem; }
+  }
+
+  @media (max-width: 600px) {
+    .eb-wrap { padding-left: 1rem; padding-right: 3.25rem; }
+    .eb-card > summary { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; }
+    .eb-card-actions { flex-direction: column; gap: .25rem; }
+  }
+</style>
+
+<div class="standard-page eb-wrap" style="margin-top: 100px; margin-bottom: 4rem;">
+  <header class="eb-header">
+    <p class="section-label" style="color: var(--color-accent);">Field records</p>
+    <h1 class="page-title">{{ title }}</h1>
+    <div class="eb-lede-wrap">{{ content | safe }}</div>
+  </header>
+
+  {% if callout %}
+  <aside class="eb-note">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+    <p>{{ callout | safe }}</p>
+  </aside>
+  {% endif %}
+
+  <p class="eb-loading" id="eb-loading">Loading checklists&hellip;</p>
+
+  <div id="eb-loader" hidden>
+    <label class="eb-drop" id="eb-drop" for="eb-file">
+      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <p class="eb-drop-title">Drop an eBird CSV here</p>
+      <p class="eb-drop-hint">or click to choose a file.  You can upload a <code>.zip</code> or <code>.csv</code> from eBird. Data is read in your browser and discarded after you leave this page.</p>
+      <!-- No accept filter: macOS reports zips as application/zip or
+           application/x-zip-compressed depending on how they were made, and browsers greyed
+           valid exports out in the Finder dialog. The file is validated on read instead,
+           with a message naming what went wrong. -->
+      <input type="file" id="eb-file">
+    </label>
+    <p class="eb-error" id="eb-error" hidden></p>
+  </div>
+
+  <div id="eb-app" hidden>
+    <div class="eb-filters">
+      <input type="search" id="eb-search" placeholder="Search species, location, notes…" aria-label="Search">
+      <select id="eb-year" aria-label="Filter by year"><option value="">All years</option></select>
+      <select id="eb-region" aria-label="Filter by region"><option value="">All regions</option></select>
+      <label for="eb-from">From</label><input type="date" id="eb-from">
+      <label for="eb-to">To</label><input type="date" id="eb-to">
+      <button type="button" class="eb-btn" id="eb-reset">Reset</button>
+      <button type="button" class="eb-btn" id="eb-pick">Use your own CSV</button>
+    </div>
+    <figure class="eb-spark" id="eb-spark" hidden>
+      <figcaption class="eb-spark-head">
+        <span class="eb-spark-heading">
+          <span class="eb-spark-title" id="eb-spark-title">Checklists per week</span>
+          <span class="eb-spark-range" id="eb-spark-range"></span>
+        </span>
+        <span class="eb-spark-controls">
+          <span class="eb-spark-readout" id="eb-spark-readout"></span>
+          <span class="eb-bar-toggle" id="eb-bar-toggle" role="group" aria-label="Chart measure">
+            <button type="button" data-metric="checklists" class="is-on" aria-pressed="true">Checklists</button>
+            <button type="button" data-metric="species" aria-pressed="false">Species</button>
+          </span>
+        </span>
+      </figcaption>
+      <div class="eb-bars" id="eb-bars"></div>
+      <div class="eb-bar-axis" id="eb-bar-axis" aria-hidden="true"></div>
+    </figure>
+
+    <div id="eb-sentinel-up" class="eb-sentinel" aria-hidden="true"></div>
+    <div id="eb-list"></div>
+    <div id="eb-sentinel-down" class="eb-sentinel" aria-hidden="true"></div>
+    <p class="eb-end" id="eb-end" hidden></p>
+  </div>
+  <nav class="eb-rail" id="eb-rail" aria-label="Jump to date" hidden></nav>
+  <div class="eb-bubble" id="eb-bubble" hidden aria-hidden="true"></div>
+</div>
+
+<script src="{{ '/static/js/ebird.js' | url }}" defer></script>

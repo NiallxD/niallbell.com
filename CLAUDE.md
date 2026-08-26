@@ -236,6 +236,118 @@ check the parameter would render an arbitrary remote image under this site's nam
 
 ---
 
+## eBird Checklists (`/ebird/`)
+
+A hidden page (`noindex`, not in nav) that renders my eBird history from a CSV export.
+
+| File | Purpose |
+|---|---|
+| `templates/ebird.njk` | Layout + scoped CSS, extends `base.njk` |
+| `static/js/ebird.js` | CSV parser, checklist grouping, filters, rendering |
+| `static/data/ebird.csv` | The data — an eBird "Download My Data" export |
+| `1.0 - Main Pages/9.9 - eBird Checklists.md` | `permalink: /ebird/`, `layout: ebird.njk`, `hide: true` |
+
+**To update the data, replace `static/data/ebird.csv` with a fresh export.** Nothing else
+changes — column order is read from the header row, not assumed.
+
+**Date and time formats vary between exports.** The same account has produced both
+`2025-10-07` / `09:54 AM` and `21/08/2026` / `7:00 am` (eBird follows the account locale, and
+opening the file in Excel rewrites dates too), so `parseDate` accepts ISO and slash forms and
+`parseTime` accepts either casing. Slash order is ambiguous row by row, so `detectDayFirst`
+decides it once per file: the first component above 12 anywhere settles it, day-first is the
+fallback. `dateStr` is then normalised to ISO, because the from/to date inputs compare it as a
+string. Times are stored as minutes since midnight — a string sort puts "7:00 am" after
+"10:04 am".
+
+The page fetches that CSV at runtime and parses it in the browser (hand-rolled quote-aware
+parser; eBird comments contain both commas and embedded newlines, so a naive split fails).
+Rows are grouped by `Submission ID` into checklists, sorted newest-first, then bucketed into
+Mon–Sun weeks. The list renders a **moving window** of those weeks (`startWeek` + `weeksShown`),
+12 at a time — the full export is ~1,150 checklists / 13,000 rows across ~190 weeks, and
+rendering every species table at once is needlessly slow.
+
+Two `IntersectionObserver` sentinels sit either side of the list and extend the window before
+the reader reaches an edge (`rootMargin: 900px`). Extending appends/prepends HTML rather than
+re-rendering, so open checklists stay open; a prepend corrects `scrollBy` for the height it
+just inserted, or the page jumps under the reader. A scrubber jump outside the window
+*re-seats* it on the target instead of rendering everything in between — that is the whole
+point of being able to reach 2016 — while a jump just past the end simply appends, so short
+scrubs stay continuous.
+
+**Callout (`.eb-note`):** the lightbulb card under the header, styled after `.analytics-note`
+on `/site-activity/`. Its text is the page's `callout:` front matter (folded YAML, HTML
+allowed, rendered with `| safe`), so it is edited in the `.md` and the card disappears if the
+field is removed.
+
+**Activity bars (`.eb-bars`):** one bar per calendar week for the last 52 weeks, height =
+checklists that week, sitting under the filters in a `.chart-card`-style panel. Hovering names
+the week and its count; clicking travels to it in the list. Plain HTML bars, not SVG — rounded
+ends and hit targets stay exact at any width, and it matches the bar chart on `/site-activity/`.
+Non-zero weeks get a 6% floor so a one-checklist week is still visible beside a busy one.
+A pill toggle in the card header switches the measure to **distinct species that week** (both
+measures are bucketed in one pass; flipping the toggle only calls `paintBars`, never re-walks
+the data). Species counts are per-week distinct, so they do not sum across checklists.
+
+This started as a *daily* sparkline and did not work: raw daily counts are only ever 0–3, so
+the line had to be a rolling per-day mean, and a fractional "checklists per day" rate is not a
+quantity anyone reads intuitively — widening the smoothing window did not save it. Weeks are
+the unit the rest of the page is already grouped by, and a count is a count. Don't reintroduce
+the rate.
+
+**Date scrubber (`.eb-rail`):** a sticky rail left of the list, ticks distributed evenly over
+the full filtered range — one per week up to 50 weeks, one per month beyond that (a decade of
+data is ~70 month ticks; per-week ticks would be a pixel high). Click a tick or drag the rail
+to travel; a bubble follows the pointer with the week under it, and the tick for the week being
+read stays lit. That reading line **travels** — level with the header at the top of the
+document, level with the bottom of the viewport at the end of it — because a fixed line near
+the top lags badly at the end of a list: the final weeks never reach it, so the rail still
+pointed at 2018 while the oldest checklist of 2016 was on screen. Reaching the end of a fully
+rendered list pins the rail to its last tick outright, so the fill completes with the last
+checklist rather than somewhere inside the footer. The bubble and lit tick track the pointer immediately
+while the travel itself is throttled to one re-seat per animation frame — pointermove fires far
+faster than the list can re-render. It is `position: fixed` against the right edge, below the
+footer in the stack (`.site-footer` gets `position: relative; z-index: 10` in the page's scoped
+CSS, since a fixed element otherwise paints over in-flow content). Only year boundaries, the hovered tick and the active
+tick show labels — turning them all on at once smears them together at that density. Because
+the list pages in 12 weeks at a time, `goToWeek` calls `ensureRendered` first, expanding
+`weeksShown` far enough that the target section exists before scrolling to it. It stays on
+touch screens too (narrower, 44px, standing labels dropped — the bubble names the week under
+your thumb): the page hides the native scrollbar, so the rail is the only scroll affordance
+there.
+
+**The picker accepts the `.zip` eBird actually hands you**, not just the CSV inside it. The
+zip container is parsed in `ebird.js` (EOCD → central directory → local headers) and the
+DEFLATE stream goes to the browser's own `DecompressionStream('deflate-raw')` — no library,
+nothing added to the CSP. Stored (uncompressed) entries are handled too, `__MACOSX`/`._`
+resource forks are skipped, `MyEBirdData.csv` wins over any other CSV in the archive, and
+encrypted archives get a "unzip it first" message rather than a silent failure.
+
+The `<input type="file">` deliberately carries **no `accept` filter**: macOS reports zips as
+`application/zip` or `application/x-zip-compressed` depending on how they were made, and
+browsers greyed valid exports out in the Finder dialog. The type is decided by sniffing the
+header instead (`PK\x03\x04`), so a misnamed file still works either way.
+
+**Links inside `<summary>` need care.** The browser follows the link *and* toggles the row;
+`stopPropagation` does not help (listeners on the same element still run) and `preventDefault`
+cancels the navigation as well. The row's click handler therefore cancels the click and calls
+`window.open` itself — a direct user gesture, so no popup blocker. Anything clickable added
+inside a summary has to account for this.
+
+The file picker is a fallback path, not the primary one: it renders someone else's export in
+their own browser and covers the bundled file failing to load.
+
+**CSP:** `connect-src` had no `'self'` entry — it lists external hosts only, and an explicit
+`connect-src` overrides `default-src 'self'`, so the fetch of a same-origin file was blocked
+until `'self'` was added. Any future same-origin `fetch`/XHR needs it too.
+
+**Size:** the full export is ~4MB (~950KB gzipped over the wire). If shipping it whole becomes
+a problem, the fix is a build hook that transforms the CSV into compact JSON in `_site` (the
+`pano-preview` hook is the precedent) — keeping "update the CSV" as the only maintenance step.
+Note the real export's comments name other people; the file is publicly fetchable at
+`/static/data/ebird.csv` regardless of the page's `noindex`.
+
+---
+
 ## Content Security Policy
 
 Set as `<meta http-equiv="Content-Security-Policy">` in `templates/base.njk`. Applies in production and locally.
