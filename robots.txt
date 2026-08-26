@@ -1,5 +1,7 @@
 User-agent: *
 Disallow: /travel/
+Disallow: /ebird/
+Disallow: /static/data/
 
 # Block AI Crawlers
 User-agent: GPTBot

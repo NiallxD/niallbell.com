@@ -36,6 +36,29 @@
     return rows;
   }
 
+  /* ── Free-text de-obfuscation ──
+     The bundled export is fetched over the network, so its contents are readable
+     by any crawler that requests the file, JavaScript or not. The build hook in
+     eleventy.config.js base64s the two free-text columns (field notes and
+     observation details) on the way into _site, marking each with B64_MARK; they
+     are decoded back here, at parse time, so everything downstream — rendering,
+     search — sees ordinary text. Values without the marker pass through
+     untouched, which is what keeps the file picker working: a reader's own
+     export straight from eBird is plain. */
+  var B64_MARK = '~b64~';
+
+  function deobfuscate(v) {
+    if (v.lastIndexOf(B64_MARK, 0) !== 0) return v;
+    try {
+      var bin = atob(v.slice(B64_MARK.length));
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    } catch (e) {
+      return '';
+    }
+  }
+
   function toObjects(rows) {
     if (!rows.length) return [];
     var head = rows[0].map(function (h) { return h.trim(); });
@@ -43,7 +66,7 @@
     for (var r = 1; r < rows.length; r++) {
       if (rows[r].length === 1 && rows[r][0] === '') continue;
       var o = {};
-      for (var c = 0; c < head.length; c++) o[head[c]] = (rows[r][c] || '').trim();
+      for (var c = 0; c < head.length; c++) o[head[c]] = deobfuscate((rows[r][c] || '').trim());
       out.push(o);
     }
     return out;
