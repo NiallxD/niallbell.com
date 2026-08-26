@@ -340,6 +340,26 @@ their own browser and covers the bundled file failing to load.
 `connect-src` overrides `default-src 'self'`, so the fetch of a same-origin file was blocked
 until `'self'` was added. Any future same-origin `fetch`/XHR needs it too.
 
+**Free-text columns are obfuscated.** `Checklist Comments` and `Observation Details` are prose
+from a personal journal that names other people, and the CSV is fetchable by anything — the site
+serves it at `/static/data/ebird.csv`, and **this repo is public**, so GitHub served the committed
+copy too. `scripts/ebird-obfuscate.mjs` base64s those two columns with a `~b64~` marker;
+`deobfuscate()` in `ebird.js` decodes them inside `toObjects`, so rendering and search see ordinary
+text. Same bargain as the click-to-reveal email addresses in `base.njk`: obfuscation, not
+encryption — it defeats bulk scraping, not a person who opens the file and notices the marker.
+
+The pass is **idempotent**, and runs in two places:
+- `eleventy.config.js` (`eleventy.after`) over the build output — covers a plain export dropped in
+  locally.
+- `.github/workflows/deploy.yml`, as a CLI over the committed file, committing the result back.
+  **This is what makes the mobile update path safe:** upload a fresh export through the GitHub app
+  and the Action encodes it in place within a minute, so the branch head never carries readable
+  field notes. The plaintext blob does exist in that one upload commit; history was deliberately
+  left alone.
+
+Unmarked values pass through untouched, which is what keeps the file picker working on a reader's
+own plain export straight from eBird. `robots.txt` also disallows `/ebird/` and `/static/data/`.
+
 **Size:** the full export is ~4MB (~950KB gzipped over the wire). If shipping it whole becomes
 a problem, the fix is a build hook that transforms the CSV into compact JSON in `_site` (the
 `pano-preview` hook is the precedent) — keeping "update the CSV" as the only maintenance step.

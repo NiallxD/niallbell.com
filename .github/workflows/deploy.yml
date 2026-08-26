@@ -20,6 +20,23 @@ jobs:
 
       - run: npm ci
 
+      # The eBird export is a personal journal, and this repo is public — an
+      # uploaded CSV is plaintext on raw.githubusercontent.com until this runs.
+      # Encode its free-text columns in place and commit the result back, so
+      # the branch head never carries readable field notes. The pass is
+      # idempotent, so a push that didn't touch the CSV is a no-op.
+      - name: Obfuscate eBird field notes in the committed export
+        run: |
+          [ -f static/data/ebird.csv ] || exit 0
+          node scripts/ebird-obfuscate.mjs static/data/ebird.csv
+          if ! git diff --quiet -- static/data/ebird.csv; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add static/data/ebird.csv
+            git commit -m "Obfuscate eBird field notes in committed export"
+            git push
+          fi
+
       - run: npm run build
 
       - uses: peaceiris/actions-gh-pages@v3

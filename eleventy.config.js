@@ -270,6 +270,30 @@ export default function (eleventyConfig) {
     console.log(`[pano-preview] generated ${wanted.size} panorama preview(s)`);
   });
 
+  // ── eBird free-text obfuscation ────────────────────────────
+  // The export is fetched from /static/data/ebird.csv, so its contents are
+  // readable by anything that can request that file — no JavaScript required.
+  // The field notes are the part that matters: they are prose, and they name
+  // other people. Encode them on the way into _site so the served file carries
+  // no plaintext to scrape; static/js/ebird.js decodes at parse time.
+  //
+  // The committed copy is encoded separately, by the CLI in deploy.yml — this
+  // hook is what covers a plain export dropped in locally. Both call the same
+  // idempotent pass, so an already-encoded source builds unchanged.
+  eleventyConfig.on("eleventy.after", async ({ dir }) => {
+    const { readFile, writeFile } = await import("fs/promises");
+    const { obfuscateCsv } = await import("./scripts/ebird-obfuscate.mjs");
+
+    const src = join(dir.output, "static/data/ebird.csv");
+    let input;
+    try { input = await readFile(src, "utf8"); } catch { return; }
+
+    const { text, encoded } = obfuscateCsv(input);
+    if (!encoded) return;
+    await writeFile(src, text, "utf8");
+    console.log(`[ebird-obfuscate] encoded ${encoded} free-text field(s)`);
+  });
+
   // Markdown-it with HTML enabled + wikilinks + footnotes
   const wikilinkMap = buildWikilinkMap(".");
   const md = markdownIt({ html: true, linkify: true, typographer: true });
